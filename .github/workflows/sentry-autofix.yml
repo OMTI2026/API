@@ -39,15 +39,49 @@ jobs:
             1. Analiza el stacktrace y localiza el archivo y la linea culpable en este repositorio.
             2. Determina la causa raiz. NO inventes; si el stacktrace no apunta a codigo de este repo
                (p.ej. timeout de un servicio externo, dato malformado del cliente, dependencia externa),
-               NO cambies codigo: deja un comentario en el issue con el diagnostico y por que no procede un fix.
+               NO cambies codigo: deja un comentario en el issue (con el MISMO formato legible de abajo)
+               con el diagnostico y por que no procede un fix.
             3. Si hay un fix claro y de bajo riesgo, implementalo de forma minima y enfocada,
                respetando el estilo del codigo y CLAUDE.md si existe. Prefiere manejo de errores
                defensivo (validacion de input, guards) cuando aplique.
             4. Abre un Pull Request hacia la rama por defecto con el fix, titulado
-               "fix(sentry): <resumen>" y enlazando el issue con "Closes #${{ github.event.issue.number }}".
-            5. En la descripcion del PR explica: causa raiz, el cambio, y como verificarlo.
-            6. No toques secrets, variables de entorno ni configuracion de infra (Railway/Tigris).
+               "fix(sentry): <resumen corto>" y enlazando el issue con "Closes #${{ github.event.issue.number }}".
+            5. No toques secrets, variables de entorno ni configuracion de infra (Railway/Tigris).
                Si el fix requiere mas contexto del que tienes, comenta tu diagnostico en el issue.
+
+            IMPORTANTE - FORMATO DE LA DESCRIPCION DEL PR (y del comentario de diagnostico):
+            Escribe para una persona NO TECNICA (ej. un coordinador de operaciones, no un programador).
+            Usa lenguaje claro y cotidiano, evita jerga; si usas un termino tecnico, explicalo en parentesis.
+            Extrae el link de Sentry del cuerpo del issue y reproducelo. Usa EXACTAMENTE estas secciones:
+
+            ## 🔴 Que paso
+            (1-2 frases sencillas, el impacto para el usuario o el sistema. Ej: "Al guardar un flete,
+            el sistema respondia con un error y el registro no se guardaba." Nada de codigo aqui.)
+
+            ## 📍 Donde paso
+            - Funcionalidad / endpoint: (nombre amigable + ruta, ej: "Crear flete (POST /fletes)")
+            - Entorno: (development o production, dilo en palabras: "ambiente de pruebas" o "produccion (usuarios reales)")
+
+            ## ⏱️ Como y cuando paso
+            (Que accion del usuario o que dato desencadeno el error, en lenguaje sencillo.
+            Ej: "Ocurria al enviar el formulario de un flete sin la fecha, que el sistema no esperaba vacia.")
+
+            ## 🔗 Sentry
+            (El/los link(s) al issue de Sentry, tal cual vienen en el cuerpo del issue.)
+
+            ## 🔧 Que cambiamos y por que
+            (Explicacion sencilla del arreglo y por que soluciona el problema. Si NO hubo cambio,
+            explica por que no hacia falta. Sin codigo aqui.)
+
+            ## ✅ Como comprobar que quedo bien
+            (Pasos simples que cualquiera pueda seguir para verificar.)
+
+            <details>
+            <summary>🛠️ Detalles tecnicos (para desarrolladores)</summary>
+
+            (AQUI si pon lo tecnico: archivo:linea culpable, causa raiz tecnica, resumen del diff,
+            stacktrace relevante, y cualquier nota de implementacion.)
+            </details>
           claude_args: |
             --max-turns 15
             --model claude-opus-4-8
