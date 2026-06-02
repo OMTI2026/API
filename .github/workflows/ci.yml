@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Ephemeral Postgres for the smoke run (R2/Tigris is optional — the API
+    # returns 503 on /upload/sign without it, which the smoke treats as expected).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tms_test
+      # CI-only dummy secrets (>=32 chars). Never used outside this throwaway job.
+      JWT_ACCESS_SECRET: ci_access_secret_ci_access_secret_0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_ci_refresh_secret_0123456789
+      PORT: '3000'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations
+        run: npm run migrate:up
+
+      - name: Seed admin user
+        run: npm run seed:admin
+
+      - name: Start API (background)
+        run: |
+          npm start &
+          echo $! > .api.pid
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "API is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy in time"; exit 1
+
+      - name: Smoke test (end-to-end)
+        run: npm run smoke
+        env:
+          BASE_URL: http://localhost:3000
+
+      - name: Stop API
+        if: ${{ always() }}
+        run: '[ -f .api.pid ] && kill "$(cat .api.pid)" || true'
