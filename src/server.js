@@ -21,6 +21,7 @@ import cxcRoutes from './routes/cxc.routes.js';
 import cxpRoutes from './routes/cxp.routes.js';
 import usuariosRoutes from './routes/usuarios.routes.js';
 import statsRoutes from './routes/stats.routes.js';
+import sysconfigRoutes from './routes/sysconfig.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -55,6 +56,7 @@ export async function build() {
   await app.register(cxpRoutes, { prefix: '/cxp' });
   await app.register(usuariosRoutes, { prefix: '/usuarios' });
   await app.register(statsRoutes, { prefix: '/stats' });
+  await app.register(sysconfigRoutes, { prefix: '/sysconfig' });
 
   return app;
 }

@@ -124,6 +124,37 @@ export default async function fletesRoutes(app) {
     return rows[0];
   });
 
+  // CHECKLIST operativo (se guarda dentro de fletes.data, sin tabla nueva).
+  //   data.checklist            -> {docs:{}, unidad:{}, operador:{}, statusGral, ...}
+  //   data.checklistAutorizado  -> boolean (set por autorizarChecklist del front)
+  //   data.checklistFechaAut    -> fecha/hora de autorización
+  // El PUT /:id genérico también persiste data.checklist (merge JSONB), pero este
+  // endpoint da semántica explícita de autorización con el mismo RBAC/BU scoping.
+  const checklistSchema = z.object({
+    checklist: z.record(z.any()).optional(),
+    autorizado: z.boolean().optional(),
+    fecha_autorizacion: z.string().optional(),
+  });
+  app.patch('/:id/checklist', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+    const p = checklistSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const d = p.data;
+    // Construye el parche JSONB solo con las claves presentes, para no pisar otras.
+    const patch = {};
+    if (d.checklist !== undefined) patch.checklist = d.checklist;
+    if (d.autorizado !== undefined) patch.checklistAutorizado = d.autorizado;
+    if (d.fecha_autorizacion !== undefined) patch.checklistFechaAut = d.fecha_autorizacion;
+    const { rows } = await q(
+      `UPDATE fletes SET data = data || $2::jsonb, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, JSON.stringify(patch)],
+    );
+    return rows[0];
+  });
+
   // CANCELAR — admin/gerente
   const cancelSchema = z.object({ motivo: z.string().min(1), responsable: z.string().min(1) });
   app.post('/:id/cancelar', { preHandler: [app.requireRole('admin', 'gerente')] }, async (req, reply) => {
