@@ -154,7 +154,7 @@ ADMIN_EMAIL=admin@elroi.mx ADMIN_PASSWORD=elroi2025 npm run smoke
 3. **Migrar datos reales** del `localStorage` actual a Postgres (script one-off) si ya hay fletes/clientes en uso.
 4. **Endurecer:** mover validación de secuencias CxC/CxP y monitoreo al servidor; flujo de "olvidé contraseña"; activar 2FA al admin.
 
-> El código está commiteado en **`main` (local)**. No se ha hecho `git push origin main` (origin: `OMTI2026/TMS`). El detalle del diseño está en [`../MIGRACION.md`](../MIGRACION.md).
+> El código de la API vive en este repo (origin: `OMTI2026/API`). El detalle del diseño y el plan de migración están en el repo del frontend: [`OMTI2026/TMS` · `MIGRACION.md`](https://github.com/OMTI2026/TMS/blob/main/MIGRACION.md).
 
 ---
 

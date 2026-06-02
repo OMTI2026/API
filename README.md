@@ -4,6 +4,22 @@ API Fastify para el TMS: **PostgreSQL (Railway) + Bucket S3-compatible (Railway)
 
 > **Infra ya desplegada** (prod + dev) y cómo operarla: ver **[`OPERACIONES.md`](./OPERACIONES.md)**.
 
+## Arquitectura y repos
+
+Este es el **backend** del producto. El **frontend** (la app `index.html`, ES5,
+servida como sitio estático) vive en un repo separado:
+**[`OMTI2026/TMS`](https://github.com/OMTI2026/TMS)**. Antes ambos vivían en un
+monorepo; se separaron en `OMTI2026/TMS` (frontend) y `OMTI2026/API` (backend).
+
+```
+Navegador → TMS (index.html estático) → fetch → API (Fastify) → Postgres
+                                                              → Bucket (S3)
+```
+
+El cliente HTTP del front (`api-client.js` / `ElroiAPI`) y el plan de migración
+de `localStorage` a esta API están documentados en el repo del frontend
+([`OMTI2026/TMS` · `MIGRACION.md`](https://github.com/OMTI2026/TMS/blob/main/MIGRACION.md)).
+
 ## Estructura
 
 ```
