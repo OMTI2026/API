@@ -65,7 +65,7 @@ export async function build() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const app = await build();
   try {
-    await app.listen({ port: env.PORT, host: '0.0.0.0' });
+    await app.listen({ port: env.PORT, host: '::' });
   } catch (err) {
     app.log.error(err);
     process.exit(1);
