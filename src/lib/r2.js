@@ -17,6 +17,11 @@ if (r2Enabled) {
   client = new S3Client({
     region: 'auto',
     endpoint: env.R2_ENDPOINT,
+    // Path-style (t3.storageapi.dev/<bucket>/<key>) en vez del virtual-hosted
+    // por defecto (<bucket>.t3.storageapi.dev): el subdominio virtual-hosted de
+    // Tigris NO devuelve cabeceras CORS en el preflight, así que el PUT directo
+    // del navegador al bucket se bloquea. Path-style sí responde CORS.
+    forcePathStyle: true,
     credentials: { accessKeyId: env.R2_KEY, secretAccessKey: env.R2_SECRET },
   });
 }
