@@ -2,12 +2,24 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { q } from '../db.js';
+import { canSeeBU } from '../lib/scope.js';
 import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
 const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
 
 function safeName(name) {
   return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+}
+
+// Carga la BU del flete y verifica que el usuario pueda operarla. Devuelve
+// `{ ok: false, code }` para que el caller responda 404 (flete inexistente) o
+// 403 (existe pero fuera del alcance de BU del usuario) — sin esto, cualquier
+// usuario autenticado podía leer/escribir archivos de fletes de otra BU (IDOR).
+async function assertFleteScope(user, fleteId) {
+  const { rows } = await q('SELECT bu FROM fletes WHERE id = $1', [fleteId]);
+  if (!rows[0]) return { ok: false, code: 404 };
+  if (!canSeeBU(user, rows[0].bu)) return { ok: false, code: 403 };
+  return { ok: true };
 }
 
 export default async function uploadRoutes(app) {
@@ -31,6 +43,9 @@ export default async function uploadRoutes(app) {
 
     if (!ALLOWED_MIME.has(mime)) return reply.code(415).send({ error: 'mime_no_permitido', allowed: [...ALLOWED_MIME] });
     if (bytes > MAX_BYTES) return reply.code(413).send({ error: 'archivo_muy_grande', maxBytes: MAX_BYTES });
+
+    const scope = await assertFleteScope(req.user, fleteId);
+    if (!scope.ok) return reply.code(scope.code).send({ error: scope.code === 404 ? 'no_encontrado' : 'bu_forbidden' });
 
     const key = `${env.NODE_ENV}/fletes/${fleteId}/${contexto}/${crypto.randomUUID()}-${safeName(filename)}`;
     try {
@@ -58,6 +73,9 @@ export default async function uploadRoutes(app) {
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
     const { fleteId, contexto, modulo, key, filename, mime, bytes } = parsed.data;
 
+    const scope = await assertFleteScope(req.user, fleteId);
+    if (!scope.ok) return reply.code(scope.code).send({ error: scope.code === 404 ? 'no_encontrado' : 'bu_forbidden' });
+
     const { rows } = await q(
       `INSERT INTO archivos (flete_id, contexto, modulo, r2_key, filename, mime, bytes, uploaded_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, contexto, filename, created_at`,
@@ -68,8 +86,14 @@ export default async function uploadRoutes(app) {
 
   // 3) URL GET firmada para mostrar/descargar.
   app.get('/:id/url', async (req, reply) => {
-    const { rows } = await q('SELECT r2_key, filename, mime FROM archivos WHERE id = $1', [req.params.id]);
+    const { rows } = await q(
+      `SELECT a.r2_key, a.filename, a.mime, f.bu
+       FROM archivos a JOIN fletes f ON f.id = a.flete_id
+       WHERE a.id = $1`,
+      [req.params.id],
+    );
     if (!rows[0]) return reply.code(404).send({ error: 'no_encontrado' });
+    if (!canSeeBU(req.user, rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     try {
       const url = await presignGet(rows[0].r2_key);
       return { url, filename: rows[0].filename, mime: rows[0].mime, expiresIn: 600 };
@@ -80,7 +104,10 @@ export default async function uploadRoutes(app) {
   });
 
   // Lista archivos de un flete (opcionalmente por contexto).
-  app.get('/by-flete/:fleteId', async (req) => {
+  app.get('/by-flete/:fleteId', async (req, reply) => {
+    const scope = await assertFleteScope(req.user, req.params.fleteId);
+    if (!scope.ok) return reply.code(scope.code).send({ error: scope.code === 404 ? 'no_encontrado' : 'bu_forbidden' });
+
     const { contexto } = req.query;
     const params = [req.params.fleteId];
     let sql = 'SELECT id, contexto, modulo, filename, mime, bytes, created_at FROM archivos WHERE flete_id = $1';
