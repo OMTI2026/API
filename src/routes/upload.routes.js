@@ -1,0 +1,92 @@
+import crypto from 'node:crypto';
+import { z } from 'zod';
+import { env } from '../env.js';
+import { q } from '../db.js';
+import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
+
+const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
+
+function safeName(name) {
+  return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+}
+
+export default async function uploadRoutes(app) {
+  // Todas requieren sesión.
+  app.addHook('preHandler', app.authenticate);
+
+  const signSchema = z.object({
+    fleteId: z.string().uuid(),
+    contexto: z.enum(CONTEXTS),
+    modulo: z.enum(['cxc', 'cxp', 'flete']).optional(),
+    filename: z.string().min(1),
+    mime: z.string().min(1),
+    bytes: z.number().int().positive(),
+  });
+
+  // 1) Pide una URL PUT firmada (el binario va directo del cliente a R2).
+  app.post('/sign', async (req, reply) => {
+    const parsed = signSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
+    const { fleteId, contexto, filename, mime, bytes } = parsed.data;
+
+    if (!ALLOWED_MIME.has(mime)) return reply.code(415).send({ error: 'mime_no_permitido', allowed: [...ALLOWED_MIME] });
+    if (bytes > MAX_BYTES) return reply.code(413).send({ error: 'archivo_muy_grande', maxBytes: MAX_BYTES });
+
+    const key = `${env.NODE_ENV}/fletes/${fleteId}/${contexto}/${crypto.randomUUID()}-${safeName(filename)}`;
+    try {
+      const url = await presignPut(key, mime);
+      return { key, url, expiresIn: 300 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
+  });
+
+  const confirmSchema = z.object({
+    fleteId: z.string().uuid(),
+    contexto: z.enum(CONTEXTS),
+    modulo: z.enum(['cxc', 'cxp', 'flete']).optional(),
+    key: z.string().min(1),
+    filename: z.string().min(1),
+    mime: z.string().min(1),
+    bytes: z.number().int().positive(),
+  });
+
+  // 2) Confirma la subida: registra metadata en `archivos`.
+  app.post('/confirm', async (req, reply) => {
+    const parsed = confirmSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
+    const { fleteId, contexto, modulo, key, filename, mime, bytes } = parsed.data;
+
+    const { rows } = await q(
+      `INSERT INTO archivos (flete_id, contexto, modulo, r2_key, filename, mime, bytes, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, contexto, filename, created_at`,
+      [fleteId, contexto, modulo || null, key, filename, mime, bytes, req.user.id],
+    );
+    return rows[0];
+  });
+
+  // 3) URL GET firmada para mostrar/descargar.
+  app.get('/:id/url', async (req, reply) => {
+    const { rows } = await q('SELECT r2_key, filename, mime FROM archivos WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return reply.code(404).send({ error: 'no_encontrado' });
+    try {
+      const url = await presignGet(rows[0].r2_key);
+      return { url, filename: rows[0].filename, mime: rows[0].mime, expiresIn: 600 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
+  });
+
+  // Lista archivos de un flete (opcionalmente por contexto).
+  app.get('/by-flete/:fleteId', async (req) => {
+    const { contexto } = req.query;
+    const params = [req.params.fleteId];
+    let sql = 'SELECT id, contexto, modulo, filename, mime, bytes, created_at FROM archivos WHERE flete_id = $1';
+    if (contexto) { params.push(contexto); sql += ' AND contexto = $2'; }
+    sql += ' ORDER BY created_at DESC';
+    const { rows } = await q(sql, params);
+    return rows;
+  });
+}
