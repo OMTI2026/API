@@ -1,6 +1,6 @@
 import './instrument.js'; // DEBE ser el primer import (inicializa Sentry antes que Fastify)
 import * as Sentry from '@sentry/node';
-import { sentryEnabled } from './instrument.js';
+import { sentryEnabled, sentryRelease } from './instrument.js';
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -39,7 +39,7 @@ export async function build() {
   // Captura de errores no manejados de rutas -> Sentry (no-op si no hay DSN).
   if (sentryEnabled) {
     Sentry.setupFastifyErrorHandler(app);
-    app.log.info('Sentry activo (' + env.NODE_ENV + ')');
+    app.log.info('Sentry activo (' + env.NODE_ENV + ', release: ' + (sentryRelease || 'sin release') + ')');
   }
 
   await app.register(authPlugin);
