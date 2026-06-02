@@ -7,11 +7,6 @@ import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
 const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
 
-// Contextos de assets de SISTEMA (sin flete): branding global como el logo de la
-// empresa. Se guardan en archivos con flete_id NULL y se sirven a cualquier
-// usuario autenticado (no llevan alcance de BU). Solo admin puede escribirlos.
-const SYSTEM_CONTEXTS = ['logo'];
-
 function safeName(name) {
   return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
 }
@@ -62,58 +57,6 @@ export default async function uploadRoutes(app) {
     }
   });
 
-  // ── Assets de sistema (sin flete) ──────────────────────────────────────────
-  // El logo de la empresa no pertenece a ningún flete. Se sube por el MISMO
-  // flujo presigned (sign -> PUT R2 -> confirm) pero a una key `system/...` y la
-  // fila en `archivos` queda con flete_id NULL. Solo admin (igual que escribir
-  // sys_config). El id devuelto se guarda como sys_config.logo_ref.
-
-  const signSystemSchema = z.object({
-    contexto: z.enum(SYSTEM_CONTEXTS),
-    filename: z.string().min(1),
-    mime: z.string().min(1),
-    bytes: z.number().int().positive(),
-  });
-
-  app.post('/sign-system', { preHandler: [app.requireRole('admin')] }, async (req, reply) => {
-    const parsed = signSystemSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
-    const { contexto, filename, mime, bytes } = parsed.data;
-
-    if (!ALLOWED_MIME.has(mime)) return reply.code(415).send({ error: 'mime_no_permitido', allowed: [...ALLOWED_MIME] });
-    if (bytes > MAX_BYTES) return reply.code(413).send({ error: 'archivo_muy_grande', maxBytes: MAX_BYTES });
-
-    const key = `${env.NODE_ENV}/system/${contexto}/${crypto.randomUUID()}-${safeName(filename)}`;
-    try {
-      const url = await presignPut(key, mime);
-      return { key, url, expiresIn: 300 };
-    } catch (err) {
-      req.log.error(err);
-      return reply.code(503).send({ error: 'r2_no_disponible' });
-    }
-  });
-
-  const confirmSystemSchema = z.object({
-    contexto: z.enum(SYSTEM_CONTEXTS),
-    key: z.string().min(1),
-    filename: z.string().min(1),
-    mime: z.string().min(1),
-    bytes: z.number().int().positive(),
-  });
-
-  app.post('/confirm-system', { preHandler: [app.requireRole('admin')] }, async (req, reply) => {
-    const parsed = confirmSystemSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
-    const { contexto, key, filename, mime, bytes } = parsed.data;
-
-    const { rows } = await q(
-      `INSERT INTO archivos (flete_id, contexto, modulo, r2_key, filename, mime, bytes, uploaded_by)
-       VALUES (NULL, $1, 'system', $2, $3, $4, $5, $6) RETURNING id, contexto, filename, created_at`,
-      [contexto, key, filename, mime, bytes, req.user.id],
-    );
-    return rows[0];
-  });
-
   const confirmSchema = z.object({
     fleteId: z.string().uuid(),
     contexto: z.enum(CONTEXTS),
@@ -143,18 +86,14 @@ export default async function uploadRoutes(app) {
 
   // 3) URL GET firmada para mostrar/descargar.
   app.get('/:id/url', async (req, reply) => {
-    // LEFT JOIN: los assets de sistema (flete_id NULL) no tienen flete, así que
-    // un INNER JOIN los dejaría irresolubles. f.bu queda NULL para ellos.
     const { rows } = await q(
-      `SELECT a.r2_key, a.filename, a.mime, a.flete_id, f.bu
-       FROM archivos a LEFT JOIN fletes f ON f.id = a.flete_id
+      `SELECT a.r2_key, a.filename, a.mime, f.bu
+       FROM archivos a JOIN fletes f ON f.id = a.flete_id
        WHERE a.id = $1`,
       [req.params.id],
     );
     if (!rows[0]) return reply.code(404).send({ error: 'no_encontrado' });
-    // Asset de flete -> respeta alcance de BU. Asset de sistema (sin flete) ->
-    // visible para cualquier usuario autenticado (es branding global).
-    if (rows[0].flete_id && !canSeeBU(req.user, rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (!canSeeBU(req.user, rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     try {
       const url = await presignGet(rows[0].r2_key);
       return { url, filename: rows[0].filename, mime: rows[0].mime, expiresIn: 600 };
