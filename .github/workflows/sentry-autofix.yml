@@ -1,0 +1,53 @@
+name: Sentry Auto-Fix
+
+# Se dispara cuando un issue recibe la etiqueta "sentry-autofix".
+# Sentry (proyecto "cargodesk-api") crea el issue con el stacktrace en el cuerpo
+# mediante la accion de alerta "Create GitHub issue".
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sentry-autofix:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'sentry-autofix')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Este es un error reportado por Sentry en el backend (API Fastify, Node.js).
+            Issue #${{ github.event.issue.number }}: "${{ github.event.issue.title }}"
+
+            Detalle del error (cuerpo del issue, incluye stacktrace y link a Sentry):
+            ---
+            ${{ github.event.issue.body }}
+            ---
+
+            Tu tarea:
+            1. Analiza el stacktrace y localiza el archivo y la linea culpable en este repositorio.
+            2. Determina la causa raiz. NO inventes; si el stacktrace no apunta a codigo de este repo
+               (p.ej. timeout de un servicio externo, dato malformado del cliente, dependencia externa),
+               NO cambies codigo: deja un comentario en el issue con el diagnostico y por que no procede un fix.
+            3. Si hay un fix claro y de bajo riesgo, implementalo de forma minima y enfocada,
+               respetando el estilo del codigo y CLAUDE.md si existe. Prefiere manejo de errores
+               defensivo (validacion de input, guards) cuando aplique.
+            4. Abre un Pull Request hacia la rama por defecto con el fix, titulado
+               "fix(sentry): <resumen>" y enlazando el issue con "Closes #${{ github.event.issue.number }}".
+            5. En la descripcion del PR explica: causa raiz, el cambio, y como verificarlo.
+            6. No toques secrets, variables de entorno ni configuracion de infra (Railway/Tigris).
+               Si el fix requiere mas contexto del que tienes, comenta tu diagnostico en el issue.
+          claude_args: |
+            --max-turns 15
+            --model claude-opus-4-8
+            --allowedTools Bash,Read,Write,Edit,Glob,Grep
