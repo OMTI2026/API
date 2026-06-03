@@ -2,12 +2,13 @@ import { z } from 'zod';
 import { q } from '../db.js';
 import { canSeeBU } from '../lib/scope.js';
 
-const WRITE = ['admin', 'gerente', 'finanzas'];
-
 // Builder de rutas para los seguimientos secuenciales CxC y CxP.
 // `table` debe ser 'cxc' o 'cxp' (whitelisted, no interpolar input del usuario).
 export function seguimientoRoutes(table, closedStatus) {
   if (!['cxc', 'cxp'].includes(table)) throw new Error('tabla inválida');
+
+  // Módulo de permisos: cxc = Cobranza, cxp = Pago de Proveedores.
+  const MODULE = table === 'cxp' ? 'pagos' : 'cobranza';
 
   return async function (app) {
     app.addHook('preHandler', app.authenticate);
@@ -21,7 +22,7 @@ export function seguimientoRoutes(table, closedStatus) {
 
     // Actualiza el seguimiento: status calculado por el cliente + merge de data.
     const updSchema = z.object({ status: z.string().optional(), data: z.record(z.any()).optional() });
-    app.put('/by-flete/:fleteId', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+    app.put('/by-flete/:fleteId', { preHandler: [app.requirePerm(MODULE, 'edit')] }, async (req, reply) => {
       const p = updSchema.safeParse(req.body);
       if (!p.success) return reply.code(400).send({ error: 'bad_request' });
       const cur = await q(`SELECT bu FROM ${table} WHERE flete_id = $1`, [req.params.fleteId]);
@@ -38,7 +39,7 @@ export function seguimientoRoutes(table, closedStatus) {
     });
 
     // Cierra el proceso (COBRADO / CERRADO).
-    app.post('/cerrar/:fleteId', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+    app.post('/cerrar/:fleteId', { preHandler: [app.requirePerm(MODULE, 'edit')] }, async (req, reply) => {
       const cur = await q(`SELECT bu FROM ${table} WHERE flete_id = $1`, [req.params.fleteId]);
       if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
       if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
@@ -50,7 +51,7 @@ export function seguimientoRoutes(table, closedStatus) {
     });
 
     // Reset del seguimiento — solo admin.
-    app.post('/reset/:fleteId', { preHandler: [app.requireRole('admin')] }, async (req, reply) => {
+    app.post('/reset/:fleteId', { preHandler: [app.requirePerm(MODULE, 'edit')] }, async (req, reply) => {
       const cur = await q(`SELECT bu FROM ${table} WHERE flete_id = $1`, [req.params.fleteId]);
       if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
       if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });

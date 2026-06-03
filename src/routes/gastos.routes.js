@@ -29,7 +29,7 @@ export default async function gastosRoutes(app) {
     fecha: z.string().optional(),
   });
 
-  app.post('/', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.post('/', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
     const p = createSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const f = await fleteBU(p.data.flete_id);
@@ -44,7 +44,7 @@ export default async function gastosRoutes(app) {
     return rows[0];
   });
 
-  app.delete('/:id', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.delete('/:id', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
     const { rows } = await q(
       'SELECT g.id, f.bu FROM gastos_extra g JOIN fletes f ON f.id = g.flete_id WHERE g.id = $1',
       [req.params.id],
@@ -56,7 +56,7 @@ export default async function gastosRoutes(app) {
   });
 
   // Liberar finanzas: requiere monitoreo finalizado y >=1 gasto. Desbloquea CxC/CxP.
-  app.post('/liberar/:fleteId', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.post('/liberar/:fleteId', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
     const f = await fleteBU(req.params.fleteId);
     if (!f) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, f.bu)) return reply.code(403).send({ error: 'bu_forbidden' });

@@ -59,7 +59,7 @@ export default async function fletesRoutes(app) {
   });
 
   // CREATE: inserta flete y genera CxC/CxP en una transacción.
-  app.post('/', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.post('/', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
     const p = createSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     if (!canSeeBU(req.user, p.data.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
@@ -83,7 +83,7 @@ export default async function fletesRoutes(app) {
   });
 
   // UPDATE parcial (incluye merge de data JSONB)
-  app.put('/:id', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.put('/:id', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
     const p = createSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
@@ -108,7 +108,7 @@ export default async function fletesRoutes(app) {
 
   // Estado de monitoreo (status + data.mon) — operaciones
   const monSchema = z.object({ status: z.string().optional(), mon_finalizado: z.boolean().optional(), data: z.record(z.any()).optional() });
-  app.patch('/:id/monitoreo', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.patch('/:id/monitoreo', { preHandler: [app.requirePerm('monitoreo', 'edit')] }, async (req, reply) => {
     const p = monSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
@@ -135,7 +135,7 @@ export default async function fletesRoutes(app) {
     autorizado: z.boolean().optional(),
     fecha_autorizacion: z.string().optional(),
   });
-  app.patch('/:id/checklist', { preHandler: [app.requireRole(...WRITE)] }, async (req, reply) => {
+  app.patch('/:id/checklist', { preHandler: [app.requirePerm('checklist', 'edit')] }, async (req, reply) => {
     const p = checklistSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
@@ -157,7 +157,7 @@ export default async function fletesRoutes(app) {
 
   // CANCELAR — admin/gerente
   const cancelSchema = z.object({ motivo: z.string().min(1), responsable: z.string().min(1) });
-  app.post('/:id/cancelar', { preHandler: [app.requireRole('admin', 'gerente')] }, async (req, reply) => {
+  app.post('/:id/cancelar', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
     const p = cancelSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
