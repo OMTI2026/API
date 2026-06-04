@@ -66,11 +66,24 @@ export default async function fletesRoutes(app) {
     const d = p.data;
 
     const flete = await withTx(async (client) => {
+      // Folio ELROI automatico: si no viene del cliente, se genera "ELR" + un
+      // consecutivo (arranca en 5829). Se hace DENTRO de la transaccion y
+      // serializado con un advisory lock a nivel transaccion, de modo que dos
+      // altas simultaneas no puedan generar el mismo folio (evita duplicidad).
+      let folio = d.folio ?? null;
+      if (!folio) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', ['flete_folio_seq']);
+        const { rows: nf } = await client.query(
+          `SELECT GREATEST(5829, COALESCE(MAX((substring(folio from '^ELR([0-9]+)$'))::int), 5828) + 1) AS next
+             FROM fletes WHERE folio ~ '^ELR[0-9]+$'`,
+        );
+        folio = 'ELR' + nf[0].next;
+      }
       const { rows } = await client.query(
         `INSERT INTO fletes (folio, folio_cli, bu, cliente_id, carrier_id, tipo, origen, destino,
             fcarga, fentrega, tarifa_cobro, tarifa_pago, data)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-        [d.folio ?? null, d.folio_cli ?? null, d.bu, d.cliente_id ?? null, d.carrier_id ?? null,
+        [folio, d.folio_cli ?? null, d.bu, d.cliente_id ?? null, d.carrier_id ?? null,
          d.tipo ?? null, d.origen ?? null, d.destino ?? null, d.fcarga ?? null, d.fentrega ?? null,
          d.tarifa_cobro ?? null, d.tarifa_pago ?? null, d.data ?? {}],
       );

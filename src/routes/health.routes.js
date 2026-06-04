@@ -2,7 +2,11 @@ import { q } from '../db.js';
 import { r2Enabled } from '../env.js';
 
 export default async function healthRoutes(app) {
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+  app.get('/health', async () => ({
+    ok: true,
+    ts: new Date().toISOString(),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+  }));
 
   app.get('/health/db', async (req, reply) => {
     try {
