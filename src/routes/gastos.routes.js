@@ -44,7 +44,7 @@ export default async function gastosRoutes(app) {
     return rows[0];
   });
 
-  app.delete('/:id', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
+  app.delete('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const { rows } = await q(
       'SELECT g.id, f.bu FROM gastos_extra g JOIN fletes f ON f.id = g.flete_id WHERE g.id = $1',
       [req.params.id],

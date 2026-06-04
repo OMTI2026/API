@@ -51,7 +51,7 @@ export function seguimientoRoutes(table, closedStatus) {
     });
 
     // Reset del seguimiento — solo admin.
-    app.post('/reset/:fleteId', { preHandler: [app.requirePerm(MODULE, 'edit')] }, async (req, reply) => {
+    app.post('/reset/:fleteId', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
       const cur = await q(`SELECT bu FROM ${table} WHERE flete_id = $1`, [req.params.fleteId]);
       if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
       if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });

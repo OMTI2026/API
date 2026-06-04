@@ -39,7 +39,7 @@ export default async function carriersRoutes(app) {
     return rows[0];
   });
 
-  app.put('/:id', { preHandler: [app.requirePerm('transportistas', 'edit')] }, async (req, reply) => {
+  app.put('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = createSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM carriers WHERE id = $1', [req.params.id]);
@@ -56,7 +56,7 @@ export default async function carriersRoutes(app) {
     return rows[0];
   });
 
-  app.delete('/:id', { preHandler: [app.requirePerm('transportistas', 'edit')] }, async (req, reply) => {
+  app.delete('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const cur = await q('SELECT bu FROM carriers WHERE id = $1', [req.params.id]);
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });

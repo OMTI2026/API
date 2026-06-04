@@ -18,6 +18,19 @@ export default fp(async function rbacPlugin(app) {
     };
   });
 
+  // Solo Administrador. Para acciones de control/jerarquía: editar un registro
+  // ya capturado, eliminar, y cancelar/revertir capturas. (Crear/capturar y las
+  // capturas operativas de seguimiento siguen por la matriz, vía requirePerm.)
+  app.decorate('requireAdmin', function () {
+    return async function (req, reply) {
+      if (!req.user) return reply.code(401).send({ error: 'unauthenticated' });
+      const { rows } = await q('SELECT rol, activo FROM users WHERE id = $1', [req.user.id]);
+      const u = rows[0];
+      if (!u || u.activo === false) return reply.code(401).send({ error: 'user_inactive' });
+      if (u.rol !== 'admin') return reply.code(403).send({ error: 'forbidden', need: 'admin' });
+    };
+  });
+
   app.decorate('requirePerm', function (module, level = 'view') {
     return async function (req, reply) {
       if (!req.user) return reply.code(401).send({ error: 'unauthenticated' });

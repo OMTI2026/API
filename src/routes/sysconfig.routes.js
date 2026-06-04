@@ -40,7 +40,7 @@ export default async function sysconfigRoutes(app) {
   });
 
   // PUT /sysconfig — upsert (solo admin). Mergea settings JSONB.
-  app.put('/', { preHandler: [app.requirePerm('config', 'edit')] }, async (req, reply) => {
+  app.put('/', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = putSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     const bu = configBU(req.user);

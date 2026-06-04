@@ -96,7 +96,7 @@ export default async function fletesRoutes(app) {
   });
 
   // UPDATE parcial (incluye merge de data JSONB)
-  app.put('/:id', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
+  app.put('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = createSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
@@ -170,7 +170,7 @@ export default async function fletesRoutes(app) {
 
   // CANCELAR — admin/gerente
   const cancelSchema = z.object({ motivo: z.string().min(1), responsable: z.string().min(1) });
-  app.post('/:id/cancelar', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
+  app.post('/:id/cancelar', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = cancelSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);

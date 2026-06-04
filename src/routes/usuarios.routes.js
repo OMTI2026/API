@@ -64,7 +64,7 @@ export default async function usuariosRoutes(app) {
     permissions: permsSchema,
   });
 
-  app.put('/:id', { preHandler: [app.requirePerm('usuarios', 'edit')] }, async (req, reply) => {
+  app.put('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = updateSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     // No permitir auto-desactivarse / auto-degradarse.
@@ -102,7 +102,7 @@ export default async function usuariosRoutes(app) {
   });
 
   const pwSchema = z.object({ password: z.string().min(8) });
-  app.post('/:id/reset-password', { preHandler: [app.requirePerm('usuarios', 'edit')] }, async (req, reply) => {
+  app.post('/:id/reset-password', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const p = pwSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const hash = await hashPassword(p.data.password);
@@ -115,7 +115,7 @@ export default async function usuariosRoutes(app) {
     return { ok: true };
   });
 
-  app.delete('/:id', { preHandler: [app.requirePerm('usuarios', 'edit')] }, async (req, reply) => {
+  app.delete('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     if (req.params.id === req.user.id) return reply.code(409).send({ error: 'no_puedes_eliminarte' });
     const { rows } = await q('DELETE FROM users WHERE id = $1 RETURNING id', [req.params.id]);
     if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
