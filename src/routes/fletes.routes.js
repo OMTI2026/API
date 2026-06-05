@@ -177,11 +177,25 @@ export default async function fletesRoutes(app) {
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     const cancelacion = { ...p.data, fecha: new Date().toISOString().slice(0, 10) };
-    const { rows } = await q(
-      `UPDATE fletes SET status = 'cancelado', data = data || jsonb_build_object('cancelacion', $2::jsonb), updated_at = now()
-       WHERE id = $1 RETURNING *`,
-      [req.params.id, JSON.stringify(cancelacion)],
-    );
-    return rows[0];
+    // Cancelar el flete y, en cascada, su Cobranza (CxC) y Pago (CxP): un viaje
+    // cancelado deja de contar/afectar venta, cobranza y pagos en TODA vista.
+    const flete = await withTx(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE fletes SET status = 'cancelado', data = data || jsonb_build_object('cancelacion', $2::jsonb), updated_at = now()
+         WHERE id = $1 RETURNING *`,
+        [req.params.id, JSON.stringify(cancelacion)],
+      );
+      for (const t of ['cxc', 'cxp']) {
+        // t es una whitelist fija (no input de usuario) — seguro interpolar.
+        await client.query(
+          `UPDATE ${t} SET status = 'cancelado',
+             data = data || jsonb_build_object('cancelacion', $2::jsonb), updated_at = now()
+           WHERE flete_id = $1`,
+          [req.params.id, JSON.stringify(cancelacion)],
+        );
+      }
+      return rows[0];
+    });
+    return flete;
   });
 }

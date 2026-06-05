@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { q } from '../db.js';
-import { canSeeBU } from '../lib/scope.js';
-import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
+import { canSeeBU, visibleBUs } from '../lib/scope.js';
+import { presignPut, presignGet, deleteObject, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
 const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
 
@@ -115,5 +115,48 @@ export default async function uploadRoutes(app) {
     sql += ' ORDER BY created_at DESC';
     const { rows } = await q(sql, params);
     return rows;
+  });
+
+  // ADMIN: lista TODOS los archivos de las BUs visibles, con folio y cliente del
+  // servicio. Para la pantalla central de archivos. Filtros opcionales por
+  // contexto y modulo. requireAdmin = solo administradores.
+  app.get('/all', { preHandler: [app.requireAdmin()] }, async (req) => {
+    const params = [visibleBUs(req.user)];
+    let sql =
+      `SELECT a.id, a.flete_id, a.contexto, a.modulo, a.filename, a.mime, a.bytes, a.created_at,
+              f.folio, c.empresa AS cliente_nombre
+       FROM archivos a
+       JOIN fletes f ON f.id = a.flete_id
+       LEFT JOIN clients c ON c.id = f.cliente_id
+       WHERE f.bu = ANY($1)`;
+    const { contexto, modulo } = req.query || {};
+    if (contexto) { params.push(contexto); sql += ` AND a.contexto = $${params.length}`; }
+    if (modulo) { params.push(modulo); sql += ` AND a.modulo = $${params.length}`; }
+    sql += ' ORDER BY a.created_at DESC LIMIT 1000';
+    const { rows } = await q(sql, params);
+    return rows;
+  });
+
+  // Elimina un archivo: quita el objeto del bucket R2 + su fila en `archivos`.
+  // Mismo alcance que el resto del módulo (sesión + BU del flete). El borrado de
+  // documentos es operativo (el botón en FileUpload no está restringido a admin).
+  app.delete('/:id', async (req, reply) => {
+    const { rows } = await q(
+      `SELECT a.r2_key, f.bu
+       FROM archivos a JOIN fletes f ON f.id = a.flete_id
+       WHERE a.id = $1`,
+      [req.params.id],
+    );
+    if (!rows[0]) return reply.code(404).send({ error: 'no_encontrado' });
+    if (!canSeeBU(req.user, rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    // Best-effort sobre R2: si el objeto ya no existe o el bucket falla, igual
+    // eliminamos la metadata para no dejar un archivo "fantasma" en la UI.
+    try {
+      await deleteObject(rows[0].r2_key);
+    } catch (err) {
+      req.log.error(err, 'no se pudo borrar el objeto R2; se elimina solo la metadata');
+    }
+    await q('DELETE FROM archivos WHERE id = $1', [req.params.id]);
+    return { ok: true };
   });
 }
