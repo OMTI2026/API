@@ -20,6 +20,7 @@ export const MODULES = [
   'pagos',
   'transportistas',
   'clientes',
+  'empleados',
   'config',
   'usuarios',
 ];
@@ -28,7 +29,7 @@ export const LEVELS = ['none', 'view', 'edit'];
 const RANK = { none: 0, view: 1, edit: 2 };
 
 // Grupos para construir los presets de forma legible.
-const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'clientes', 'gastos'];
+const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'clientes', 'empleados', 'gastos'];
 const FINANZAS = ['cobranza', 'pagos'];
 
 function build(map) {
