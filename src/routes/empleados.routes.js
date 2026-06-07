@@ -44,7 +44,7 @@ const SELECT = `
 export default async function empleadosRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
-  app.get('/', async (req) => {
+  app.get('/', { preHandler: [app.requirePerm('empleados', 'view')] }, async (req) => {
     const { rows } = await q(
       `${SELECT} WHERE e.bu = ANY($1) ORDER BY e.nombre, e.apellido_paterno`,
       [visibleBUs(req.user)],

@@ -117,10 +117,11 @@ export default async function uploadRoutes(app) {
     return rows;
   });
 
-  // ADMIN: lista TODOS los archivos de las BUs visibles, con folio y cliente del
+  // Lista TODOS los archivos de las BUs visibles, con folio y cliente del
   // servicio. Para la pantalla central de archivos. Filtros opcionales por
-  // contexto y modulo. requireAdmin = solo administradores.
-  app.get('/all', { preHandler: [app.requireAdmin()] }, async (req) => {
+  // contexto y modulo. Gateado por el módulo 'archivos' (acceso por usuario en
+  // la matriz; admin siempre pasa).
+  app.get('/all', { preHandler: [app.requirePerm('archivos', 'view')] }, async (req) => {
     const params = [visibleBUs(req.user)];
     let sql =
       `SELECT a.id, a.flete_id, a.contexto, a.modulo, a.filename, a.mime, a.bytes, a.created_at,

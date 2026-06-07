@@ -23,7 +23,7 @@ const SELECT = `
 export default async function puestosRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
-  app.get('/', async (req) => {
+  app.get('/', { preHandler: [app.requirePerm('empleados', 'view')] }, async (req) => {
     const { rows } = await q(`${SELECT} WHERE p.bu = ANY($1) ORDER BY p.nivel, p.nombre`, [visibleBUs(req.user)]);
     return rows;
   });
