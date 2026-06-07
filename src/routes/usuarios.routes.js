@@ -46,9 +46,12 @@ export default async function usuariosRoutes(app) {
     if (dup.rows[0]) return reply.code(409).send({ error: 'email_existe' });
     const hash = await hashPassword(d.password);
     const overrides = diffOverrides(d.rol, d.permissions || {});
+    // must_change_password SIEMPRE false: no forzamos cambio de contraseña en el
+    // primer acceso (ver migración 0007). El usuario entra con la contraseña que
+    // se le asigna aquí.
     const { rows } = await q(
       `INSERT INTO users (nombre, email, pass_hash, rol, bu, activo, must_change_password, permissions)
-       VALUES ($1,$2,$3,$4,$5,true,true,$6)
+       VALUES ($1,$2,$3,$4,$5,true,false,$6)
        RETURNING id, nombre, email, rol, bu, activo, must_change_password, permissions, created_at`,
       [d.nombre, d.email, hash, d.rol, d.bu, JSON.stringify(overrides)],
     );
@@ -106,8 +109,9 @@ export default async function usuariosRoutes(app) {
     const p = pwSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const hash = await hashPassword(p.data.password);
+    // No forzamos cambio de contraseña: el usuario entra directo con la nueva.
     const { rows } = await q(
-      'UPDATE users SET pass_hash = $2, must_change_password = true, updated_at = now() WHERE id = $1 RETURNING id',
+      'UPDATE users SET pass_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1 RETURNING id',
       [req.params.id, hash],
     );
     if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
