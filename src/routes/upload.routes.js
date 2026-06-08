@@ -5,7 +5,7 @@ import { q } from '../db.js';
 import { canSeeBU, visibleBUs } from '../lib/scope.js';
 import { presignPut, presignGet, deleteObject, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
-const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
+const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'gps_img', 'estado_cuenta'];
 
 function safeName(name) {
   return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
