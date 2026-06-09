@@ -31,6 +31,22 @@ export default fp(async function rbacPlugin(app) {
     };
   });
 
+  // Jerarquía mínima de rol. Re-lee rol/activo FRESCOS de la BD (como
+  // requireAdmin) y exige que el rol del usuario sea >= minRole en la jerarquía.
+  // Para acciones de control delegables a Gerencia (p.ej. cancelar servicios).
+  const ROLE_ORDER = ['readonly', 'finanzas', 'operaciones', 'gerente', 'admin'];
+  app.decorate('requireMinRole', function (minRole) {
+    return async function (req, reply) {
+      if (!req.user) return reply.code(401).send({ error: 'unauthenticated' });
+      const { rows } = await q('SELECT rol, activo FROM users WHERE id = $1', [req.user.id]);
+      const u = rows[0];
+      if (!u || u.activo === false) return reply.code(401).send({ error: 'user_inactive' });
+      if (ROLE_ORDER.indexOf(u.rol) < ROLE_ORDER.indexOf(minRole)) {
+        return reply.code(403).send({ error: 'forbidden', need: minRole + '+' });
+      }
+    };
+  });
+
   app.decorate('requirePerm', function (module, level = 'view') {
     return async function (req, reply) {
       if (!req.user) return reply.code(401).send({ error: 'unauthenticated' });
