@@ -22,6 +22,12 @@ import cxpRoutes from './routes/cxp.routes.js';
 import usuariosRoutes from './routes/usuarios.routes.js';
 import statsRoutes from './routes/stats.routes.js';
 import sysconfigRoutes from './routes/sysconfig.routes.js';
+import empleadosRoutes from './routes/empleados.routes.js';
+import areasRoutes from './routes/areas.routes.js';
+import puestosRoutes from './routes/puestos.routes.js';
+import eventosRoutes from './routes/eventos.routes.js';
+import vacacionesRoutes from './routes/vacaciones.routes.js';
+import documentosRoutes from './routes/documentos.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -57,6 +63,12 @@ export async function build() {
   await app.register(usuariosRoutes, { prefix: '/usuarios' });
   await app.register(statsRoutes, { prefix: '/stats' });
   await app.register(sysconfigRoutes, { prefix: '/sysconfig' });
+  await app.register(empleadosRoutes, { prefix: '/empleados' });
+  await app.register(areasRoutes, { prefix: '/areas' });
+  await app.register(puestosRoutes, { prefix: '/puestos' });
+  await app.register(eventosRoutes, { prefix: '/eventos' });
+  await app.register(vacacionesRoutes, { prefix: '/vacaciones' });
+  await app.register(documentosRoutes, { prefix: '/documentos' });
 
   return app;
 }

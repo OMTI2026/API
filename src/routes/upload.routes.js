@@ -5,7 +5,7 @@ import { q } from '../db.js';
 import { canSeeBU, visibleBUs } from '../lib/scope.js';
 import { presignPut, presignGet, deleteObject, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
-const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'estado_cuenta'];
+const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'gps_img', 'estado_cuenta'];
 
 function safeName(name) {
   return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
@@ -117,10 +117,11 @@ export default async function uploadRoutes(app) {
     return rows;
   });
 
-  // ADMIN: lista TODOS los archivos de las BUs visibles, con folio y cliente del
+  // Lista TODOS los archivos de las BUs visibles, con folio y cliente del
   // servicio. Para la pantalla central de archivos. Filtros opcionales por
-  // contexto y modulo. requireAdmin = solo administradores.
-  app.get('/all', { preHandler: [app.requireAdmin()] }, async (req) => {
+  // contexto y modulo. Gateado por el módulo 'archivos' (acceso por usuario en
+  // la matriz; admin siempre pasa).
+  app.get('/all', { preHandler: [app.requirePerm('archivos', 'view')] }, async (req) => {
     const params = [visibleBUs(req.user)];
     let sql =
       `SELECT a.id, a.flete_id, a.contexto, a.modulo, a.filename, a.mime, a.bytes, a.created_at,

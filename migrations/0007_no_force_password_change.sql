@@ -1,0 +1,13 @@
+-- ELROI CargoDesk — se elimina el cambio de contraseña OBLIGATORIO.
+--
+-- Decisión de diseño: ningún usuario debe quedar forzado a cambiar su
+-- contraseña en el primer acceso. El flujo obligatorio dejaba atrapados a los
+-- usuarios nuevos y a los reseteados (no había pantalla para completarlo), así
+-- que se descarta por completo: `must_change_password` debe estar SIEMPRE en
+-- false.
+--
+-- El DEFAULT de la columna ya es false (0001_init.sql); el código dejó de
+-- ponerlo en true al crear/resetear (usuarios.routes.js). Aquí corregimos los
+-- registros existentes que quedaron en true (incluye a los usuarios que no
+-- podían entrar). Idempotente: re-ejecutarla no cambia nada.
+UPDATE users SET must_change_password = false WHERE must_change_password = true;

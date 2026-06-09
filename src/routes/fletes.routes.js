@@ -95,13 +95,22 @@ export default async function fletesRoutes(app) {
     return reply.code(201).send(flete);
   });
 
-  // UPDATE parcial (incluye merge de data JSONB)
-  app.put('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
+  // UPDATE parcial (incluye merge de data JSONB).
+  // Ciclo borrador → liberado: con fletes:edit se puede editar mientras es
+  // borrador; una vez liberado a monitoreo (checklist autorizado) el registro se
+  // bloquea y solo admin puede editar (correcciones).
+  app.put('/:id', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
     const p = createSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    const cur = await q(
+      `SELECT bu, (data->>'checklistAutorizado')::boolean AS liberado FROM fletes WHERE id = $1`,
+      [req.params.id],
+    );
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (cur.rows[0].liberado === true && req.user.rol !== 'admin') {
+      return reply.code(403).send({ error: 'flete_released', detail: 'Solo un administrador puede editar un servicio ya liberado a monitoreo.' });
+    }
     const d = p.data;
     const { rows } = await q(
       `UPDATE fletes SET
@@ -170,7 +179,8 @@ export default async function fletesRoutes(app) {
 
   // CANCELAR — admin/gerente
   const cancelSchema = z.object({ motivo: z.string().min(1), responsable: z.string().min(1) });
-  app.post('/:id/cancelar', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
+  // Cancelar servicio: jerarquía de Gerencia (gerente o admin).
+  app.post('/:id/cancelar', { preHandler: [app.requireMinRole('gerente')] }, async (req, reply) => {
     const p = cancelSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);

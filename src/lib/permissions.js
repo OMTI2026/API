@@ -19,16 +19,23 @@ export const MODULES = [
   'cobranza',
   'pagos',
   'transportistas',
+  'documentos',
   'clientes',
+  'empleados',
   'config',
   'usuarios',
+  'archivos',
 ];
 
 export const LEVELS = ['none', 'view', 'edit'];
 const RANK = { none: 0, view: 1, edit: 2 };
 
 // Grupos para construir los presets de forma legible.
-const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'clientes', 'gastos'];
+// NOTA: 'empleados' (RRHH) y 'archivos' NO van en ningún grupo: ambos quedan en
+// 'none' por defecto para todo rol no-admin (build() rellena lo no listado con
+// 'none'). El acceso se otorga manualmente por usuario en la matriz. admin
+// siempre tiene 'edit' en todo.
+const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'documentos', 'clientes', 'gastos'];
 const FINANZAS = ['cobranza', 'pagos'];
 
 function build(map) {
