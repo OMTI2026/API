@@ -19,6 +19,7 @@ export const MODULES = [
   'cobranza',
   'pagos',
   'transportistas',
+  'documentos',
   'clientes',
   'empleados',
   'config',
@@ -34,7 +35,7 @@ const RANK = { none: 0, view: 1, edit: 2 };
 // 'none' por defecto para todo rol no-admin (build() rellena lo no listado con
 // 'none'). El acceso se otorga manualmente por usuario en la matriz. admin
 // siempre tiene 'edit' en todo.
-const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'clientes', 'gastos'];
+const OPERACION = ['fletes', 'monitoreo', 'checklist', 'transportistas', 'documentos', 'clientes', 'gastos'];
 const FINANZAS = ['cobranza', 'pagos'];
 
 function build(map) {
