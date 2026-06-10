@@ -92,7 +92,14 @@ export default async function authRoutes(app) {
   });
 
   // ── REFRESH (rotación + detección de reuse) ────────────
-  app.post('/refresh', async (req, reply) => {
+  // Bucket de rate limit propio (independiente del global de 100/min por IP):
+  // el refresh silencioso al recargar no debe quedar starve-ado por la ráfaga de
+  // llamadas de datos de una página pesada (p. ej. Cobranza). Sin esto, una
+  // recarga que satura el límite global hacía que /auth/refresh devolviera 429 y
+  // el cliente cerrara la sesión. 60/min/IP es holgado para refrescos legítimos.
+  app.post('/refresh', {
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+  }, async (req, reply) => {
     const raw = req.cookies?.[REFRESH_COOKIE];
     if (!raw) return reply.code(401).send({ error: 'no_refresh' });
     const tokenHash = hashToken(raw);
