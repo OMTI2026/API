@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { q } from '../db.js';
-import { canSeeBU } from '../lib/scope.js';
+import { canSeeBU, visibleBUs } from '../lib/scope.js';
 
 // Builder de rutas para los seguimientos secuenciales CxC y CxP.
 // `table` debe ser 'cxc' o 'cxp' (whitelisted, no interpolar input del usuario).
@@ -12,6 +12,19 @@ export function seguimientoRoutes(table, closedStatus) {
 
   return async function (app) {
     app.addHook('preHandler', app.authenticate);
+
+    // LISTA completa del seguimiento (BU-scoped). Sustituye la carga N+1 que el
+    // front hacía con un byFlete por cada flete: ahora Cobranza/Pagos resuelven
+    // toda la tabla con UNA request y hacen el join contra la lista de fletes en
+    // memoria, en vez de disparar 100+ requests por recarga (lo que reventaba el
+    // rate limit por IP y tumbaba la sesión en el refresh silencioso).
+    app.get('/', async (req) => {
+      const { rows } = await q(
+        `SELECT * FROM ${table} WHERE bu = ANY($1) ORDER BY updated_at DESC`,
+        [visibleBUs(req.user)],
+      );
+      return rows;
+    });
 
     app.get('/by-flete/:fleteId', async (req, reply) => {
       const { rows } = await q(`SELECT * FROM ${table} WHERE flete_id = $1`, [req.params.fleteId]);
