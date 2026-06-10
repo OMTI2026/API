@@ -84,6 +84,16 @@ async function main() {
   const dash = await call('GET', '/stats/dashboard', null, true);
   log(dash.status === 200 && dash.data, 'GET /stats/dashboard', dash.data && ('venta_anual=' + dash.data.venta_anual));
 
+  // 9b) Gastos operativos: alta (sin viaje) + lista. Limpieza al final.
+  let gastoOpId = null;
+  const goCreate = await call('POST', '/gastos-operativos', {
+    bu: 'broker', concepto: 'Gasolina smoke', monto: 500, categoria: 'Combustible', metodo_pago: 'Efectivo',
+  }, true);
+  log(goCreate.status === 200 && goCreate.data && goCreate.data.id, 'POST /gastos-operativos (sin viaje)');
+  if (goCreate.data && goCreate.data.id) gastoOpId = goCreate.data.id;
+  const goList = await call('GET', '/gastos-operativos', null, true);
+  log(goList.status === 200 && Array.isArray(goList.data), 'GET /gastos-operativos', 'n=' + (Array.isArray(goList.data) ? goList.data.length : '?'));
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
@@ -99,6 +109,12 @@ async function main() {
   if (fleteId) {
     const can = await call('POST', '/fletes/' + fleteId + '/cancelar', { motivo: 'smoke', responsable: 'script' }, true);
     log(can.status === 200, 'POST /fletes/:id/cancelar (limpieza)');
+  }
+
+  // 11b) Limpieza del gasto operativo de prueba
+  if (gastoOpId) {
+    const del = await call('DELETE', '/gastos-operativos/' + gastoOpId, null, true);
+    log(del.status === 200, 'DELETE /gastos-operativos/:id (limpieza)');
   }
 
   finish();

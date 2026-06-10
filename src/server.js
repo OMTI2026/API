@@ -29,6 +29,7 @@ import eventosRoutes from './routes/eventos.routes.js';
 import vacacionesRoutes from './routes/vacaciones.routes.js';
 import documentosRoutes from './routes/documentos.routes.js';
 import mantenimientosRoutes from './routes/mantenimientos.routes.js';
+import gastosOperativosRoutes from './routes/gastos-operativos.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -71,6 +72,7 @@ export async function build() {
   await app.register(vacacionesRoutes, { prefix: '/vacaciones' });
   await app.register(documentosRoutes, { prefix: '/documentos' });
   await app.register(mantenimientosRoutes, { prefix: '/mantenimientos' });
+  await app.register(gastosOperativosRoutes, { prefix: '/gastos-operativos' });
 
   return app;
 }
