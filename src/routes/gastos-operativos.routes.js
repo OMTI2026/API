@@ -1,11 +1,22 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
+import { env } from '../env.js';
 import { q } from '../db.js';
 import { visibleBUs, canSeeBU } from '../lib/scope.js';
+import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
 // Gastos operativos (solo Flota Propia). Cada fila es un gasto que registra
 // operación; puede ligarse OPCIONALMENTE a un viaje (flete_id) o quedar sin
 // viaje. Distinto de gastos_extra (cobro/pago por servicio con liberación).
 // Permiso: módulo 'gastos'. Sigue el patrón de mantenimientos.routes.js.
+//
+// El comprobante puede llevar un archivo (foto/PDF) subido a R2 vía el flujo
+// autocontenido sign→PUT→url (como documentos/foto/*); la referencia
+// {key, filename, mime} se guarda en `data.comprobanteArchivo`.
+
+function safeName(name) {
+  return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+}
 
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
 
@@ -37,8 +48,46 @@ async function assertFleteVisible(user, fleteId, reply) {
   return true;
 }
 
+const fotoSignSchema = z.object({
+  filename: z.string().min(1),
+  mime: z.string().min(1),
+  bytes: z.number().int().positive(),
+});
+
 export default async function gastosOperativosRoutes(app) {
   app.addHook('preHandler', app.authenticate);
+
+  // Presign PUT para subir el comprobante (foto/PDF) del gasto. Autocontenido
+  // (no atado al registro: el front sube primero y guarda {key,...} en data).
+  app.post('/comprobante/sign', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
+    const p = fotoSignSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const { filename, mime, bytes } = p.data;
+    if (!ALLOWED_MIME.has(mime)) return reply.code(415).send({ error: 'mime_no_permitido', allowed: [...ALLOWED_MIME] });
+    if (bytes > MAX_BYTES) return reply.code(413).send({ error: 'archivo_muy_grande', maxBytes: MAX_BYTES });
+    const key = `${env.NODE_ENV}/gastos-operativos/${crypto.randomUUID()}-${safeName(filename)}`;
+    try {
+      const url = await presignPut(key, mime);
+      return { key, url, expiresIn: 300 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
+  });
+
+  // URL GET firmada para mostrar/descargar el comprobante. Solo claves del prefijo.
+  app.get('/comprobante/url', async (req, reply) => {
+    const key = req.query?.key;
+    if (!key || typeof key !== 'string') return reply.code(400).send({ error: 'bad_request' });
+    if (!key.includes('/gastos-operativos/')) return reply.code(400).send({ error: 'key_invalida' });
+    try {
+      const url = await presignGet(key);
+      return { url, expiresIn: 600 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
+  });
 
   // Lista por BU visible. Filtro opcional: flete_id (gastos de un viaje).
   app.get('/', async (req) => {
