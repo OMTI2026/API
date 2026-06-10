@@ -8,6 +8,9 @@ export const ALLOWED_MIME = new Set([
   'image/png',
   'image/webp',
   'image/heic',
+  // XML de la Carta Porte (CFDI). Los navegadores reportan text/xml o application/xml.
+  'application/xml',
+  'text/xml',
 ]);
 
 export const MAX_BYTES = 15 * 1024 * 1024; // 15 MB
