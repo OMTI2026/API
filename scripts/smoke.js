@@ -117,6 +117,17 @@ async function main() {
   log(folioOk, 'POST /mantenimientos (Folio OT auto)', mantCreate.data?.data?.folioOt);
   if (mantCreate.data && mantCreate.data.id) mantId = mantCreate.data.id;
 
+  // 9d) Cotización: alta + lista. Limpieza al final.
+  let cotizId = null;
+  const cotCreate = await call('POST', '/cotizaciones', {
+    bu: 'broker', origen: 'GDL', destino: 'MTY', precio: 12345.67,
+    data: { distanciaKm: 800, casetasTotal: 1500 },
+  }, true);
+  log(cotCreate.status === 200 && cotCreate.data && cotCreate.data.id, 'POST /cotizaciones');
+  if (cotCreate.data && cotCreate.data.id) cotizId = cotCreate.data.id;
+  const cotList = await call('GET', '/cotizaciones', null, true);
+  log(cotList.status === 200 && Array.isArray(cotList.data), 'GET /cotizaciones', 'n=' + (Array.isArray(cotList.data) ? cotList.data.length : '?'));
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
@@ -144,6 +155,12 @@ async function main() {
   if (mantId) {
     const del = await call('DELETE', '/mantenimientos/' + mantId, null, true);
     log(del.status === 200, 'DELETE /mantenimientos/:id (limpieza)');
+  }
+
+  // 11d) Limpieza de la cotización de prueba
+  if (cotizId) {
+    const del = await call('DELETE', '/cotizaciones/' + cotizId, null, true);
+    log(del.status === 200, 'DELETE /cotizaciones/:id (limpieza)');
   }
 
   finish();
