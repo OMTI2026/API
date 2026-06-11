@@ -6,7 +6,7 @@ export default async function statsRoutes(app) {
 
   // KPIs del dashboard: venta/utilidad del mes y del año (SOLO fletes
   // finalizados; los cancelados NO suman venta), más conteo de cancelados.
-  // Proyección: viajes (número) y venta de TODOS los no cancelados
+  // Proyección: viajes (número), venta Y utilidad de TODOS los no cancelados
   // (activo + finalizado), del mes y del año.
   app.get('/dashboard', async (req) => {
     const bus = visibleBUs(req.user);
@@ -25,15 +25,38 @@ export default async function statsRoutes(app) {
          COALESCE(SUM(util)  FILTER (WHERE status='finalizado' AND date_trunc('month', created_at) = date_trunc('month', now())),0) AS util_mes,
          COUNT(*) FILTER (WHERE status='cancelado' AND date_trunc('month', created_at) = date_trunc('month', now())) AS cancel_mes,
          COUNT(*) FILTER (WHERE status='cancelado' AND date_trunc('year', created_at)  = date_trunc('year', now()))  AS cancel_anual,
-         -- Proyección: TODOS los viajes no cancelados (activo + finalizado), número y venta.
+         -- Proyección: TODOS los viajes no cancelados (activo + finalizado): número, venta y utilidad.
          COALESCE(SUM(cobro) FILTER (WHERE status<>'cancelado' AND date_trunc('year', created_at) = date_trunc('year', now())),0) AS proy_venta_anual,
+         COALESCE(SUM(util)  FILTER (WHERE status<>'cancelado' AND date_trunc('year', created_at) = date_trunc('year', now())),0) AS proy_util_anual,
          COUNT(*)            FILTER (WHERE status<>'cancelado' AND date_trunc('year', created_at) = date_trunc('year', now()))    AS proy_viajes_anual,
          COALESCE(SUM(cobro) FILTER (WHERE status<>'cancelado' AND date_trunc('month', created_at) = date_trunc('month', now())),0) AS proy_venta_mes,
+         COALESCE(SUM(util)  FILTER (WHERE status<>'cancelado' AND date_trunc('month', created_at) = date_trunc('month', now())),0) AS proy_util_mes,
          COUNT(*)            FILTER (WHERE status<>'cancelado' AND date_trunc('month', created_at) = date_trunc('month', now()))    AS proy_viajes_mes
        FROM base`,
       [bus],
     );
     return rows[0];
+  });
+
+  // Proyección mensual del año en curso: venta, utilidad y viajes de TODOS los
+  // fletes NO cancelados (activo + finalizado), agrupados por mes. Alimenta la
+  // gráfica del dashboard (venta/utilidad PROYECTADA por mes), a diferencia del
+  // histórico que es lo ya cerrado/archivado.
+  app.get('/proyeccion-mensual', async (req) => {
+    const { rows } = await q(
+      `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
+              COALESCE(SUM(COALESCE(tarifa_cobro,0)),0)                                  AS venta,
+              COALESCE(SUM(COALESCE(tarifa_cobro,0) - COALESCE(tarifa_pago,0)),0)         AS util,
+              COUNT(*)                                                                   AS viajes
+         FROM fletes
+        WHERE bu = ANY($1)
+          AND status <> 'cancelado'
+          AND date_trunc('year', created_at) = date_trunc('year', now())
+        GROUP BY 1
+        ORDER BY 1`,
+      [visibleBUs(req.user)],
+    );
+    return rows;
   });
 
   // Histórico mensual archivado.
