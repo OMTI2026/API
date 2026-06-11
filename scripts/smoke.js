@@ -80,6 +80,14 @@ async function main() {
   const lst = await call('GET', '/fletes', null, true);
   log(lst.status === 200 && Array.isArray(lst.data), 'GET /fletes', 'n=' + (Array.isArray(lst.data) ? lst.data.length : '?'));
 
+  // 8b) Listas en bloque que Cobranza/Pagos usan para armar la tabla sin N+1.
+  const cxpL = await call('GET', '/cxp', null, true);
+  log(cxpL.status === 200 && Array.isArray(cxpL.data), 'GET /cxp (lista)', 'n=' + (Array.isArray(cxpL.data) ? cxpL.data.length : '?'));
+  const cxcL = await call('GET', '/cxc', null, true);
+  log(cxcL.status === 200 && Array.isArray(cxcL.data), 'GET /cxc (lista)', 'n=' + (Array.isArray(cxcL.data) ? cxcL.data.length : '?'));
+  const gL = await call('GET', '/gastos', null, true);
+  log(gL.status === 200 && Array.isArray(gL.data), 'GET /gastos (lista)', 'n=' + (Array.isArray(gL.data) ? gL.data.length : '?'));
+
   // 9) Dashboard
   const dash = await call('GET', '/stats/dashboard', null, true);
   log(dash.status === 200 && dash.data, 'GET /stats/dashboard', dash.data && ('venta_anual=' + dash.data.venta_anual));
