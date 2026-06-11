@@ -7,7 +7,7 @@ import { visibleBUs, canSeeBU } from '../lib/scope.js';
 
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
 
-// Siguiente folio de Orden de Trabajo (OT01, OT02, …) consecutivo por BU.
+// Siguiente folio de Orden de Trabajo (OT001, OT002, …) consecutivo por BU.
 // Se calcula sobre data->>'folioOt' de los registros existentes. Debe correr
 // dentro de una transacción con advisory lock para evitar duplicados en
 // altas concurrentes.
@@ -25,7 +25,7 @@ async function nextFolioOt(client, bu) {
       if (n > max) max = n;
     }
   }
-  return 'OT' + String(max + 1).padStart(2, '0');
+  return 'OT' + String(max + 1).padStart(3, '0');
 }
 
 const createSchema = z.object({
