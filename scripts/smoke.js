@@ -94,6 +94,15 @@ async function main() {
   const goList = await call('GET', '/gastos-operativos', null, true);
   log(goList.status === 200 && Array.isArray(goList.data), 'GET /gastos-operativos', 'n=' + (Array.isArray(goList.data) ? goList.data.length : '?'));
 
+  // 9c) Mantenimiento: alta asigna Folio OT autogenerado (OT\d+). Limpieza al final.
+  let mantId = null;
+  const mantCreate = await call('POST', '/mantenimientos', {
+    bu: 'broker', checklist_id: 'smoke-test', referencia: 'SMOKE-1',
+  }, true);
+  const folioOk = mantCreate.status === 200 && mantCreate.data && /^OT\d+$/.test(mantCreate.data.data?.folioOt || '');
+  log(folioOk, 'POST /mantenimientos (Folio OT auto)', mantCreate.data?.data?.folioOt);
+  if (mantCreate.data && mantCreate.data.id) mantId = mantCreate.data.id;
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
@@ -115,6 +124,12 @@ async function main() {
   if (gastoOpId) {
     const del = await call('DELETE', '/gastos-operativos/' + gastoOpId, null, true);
     log(del.status === 200, 'DELETE /gastos-operativos/:id (limpieza)');
+  }
+
+  // 11c) Limpieza del mantenimiento de prueba
+  if (mantId) {
+    const del = await call('DELETE', '/mantenimientos/' + mantId, null, true);
+    log(del.status === 200, 'DELETE /mantenimientos/:id (limpieza)');
   }
 
   finish();
