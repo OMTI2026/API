@@ -82,7 +82,13 @@ async function main() {
 
   // 9) Dashboard
   const dash = await call('GET', '/stats/dashboard', null, true);
-  log(dash.status === 200 && dash.data, 'GET /stats/dashboard', dash.data && ('venta_anual=' + dash.data.venta_anual));
+  const okDash = dash.status === 200 && dash.data
+    && dash.data.proy_util_anual !== undefined && dash.data.proy_util_mes !== undefined;
+  log(okDash, 'GET /stats/dashboard (+util proy)', dash.data && ('venta_anual=' + dash.data.venta_anual + ' proy_util_anual=' + dash.data.proy_util_anual));
+
+  // 9a) Proyección mensual (alimenta la gráfica venta/utilidad proyectada).
+  const proy = await call('GET', '/stats/proyeccion-mensual', null, true);
+  log(proy.status === 200 && Array.isArray(proy.data), 'GET /stats/proyeccion-mensual', 'n=' + (Array.isArray(proy.data) ? proy.data.length : '?'));
 
   // 9b) Gastos operativos: alta (sin viaje) + lista. Limpieza al final.
   let gastoOpId = null;
