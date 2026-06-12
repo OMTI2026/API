@@ -64,6 +64,28 @@ export default async function statsRoutes(app) {
     return rows;
   });
 
+  // Venta REAL mensual del año en curso: venta, utilidad y viajes de los fletes
+  // con monStatus '19 Servicio Finalizado' ('finalizado'), sin cancelados,
+  // agrupados por mes. Alimenta la línea REAL de la gráfica del dashboard (la
+  // proyección vive en /proyeccion-mensual y en los KPIs proy_* de /dashboard).
+  app.get('/real-mensual', async (req) => {
+    const { rows } = await q(
+      `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
+              COALESCE(SUM(COALESCE(tarifa_cobro,0)),0)                                  AS venta,
+              COALESCE(SUM(COALESCE(tarifa_cobro,0) - COALESCE(tarifa_pago,0)),0)         AS util,
+              COUNT(*)                                                                   AS viajes
+         FROM fletes
+        WHERE bu = ANY($1)
+          AND status <> 'cancelado'
+          AND data->>'monStatus' = 'finalizado'
+          AND date_trunc('year', created_at) = date_trunc('year', now())
+        GROUP BY 1
+        ORDER BY 1`,
+      [visibleBUs(req.user)],
+    );
+    return rows;
+  });
+
   // Histórico mensual archivado.
   app.get('/historico', async (req) => {
     const { rows } = await q(
