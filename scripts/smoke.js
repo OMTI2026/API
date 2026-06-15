@@ -128,6 +128,17 @@ async function main() {
   const cotList = await call('GET', '/cotizaciones', null, true);
   log(cotList.status === 200 && Array.isArray(cotList.data), 'GET /cotizaciones', 'n=' + (Array.isArray(cotList.data) ? cotList.data.length : '?'));
 
+  // 9e) Casetas: el catálogo de la RNC quedó sembrado (>1000) + actualizar tarifa.
+  const casList = await call('GET', '/casetas?q=carbonera', null, true);
+  const casOk = casList.status === 200 && Array.isArray(casList.data) && casList.data.length > 0;
+  log(casOk, 'GET /casetas?q=carbonera', 'n=' + (Array.isArray(casList.data) ? casList.data.length : '?'));
+  if (casOk) {
+    const cid = casList.data[0].id;
+    const upd = await call('PUT', '/casetas/' + cid, { tarifa: 123.45 }, true);
+    log(upd.status === 200 && Number(upd.data?.tarifa) === 123.45, 'PUT /casetas/:id (tarifa)');
+    await call('PUT', '/casetas/' + cid, { tarifa: null }, true); // limpieza
+  }
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
