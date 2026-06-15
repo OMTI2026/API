@@ -139,6 +139,11 @@ async function main() {
     await call('PUT', '/casetas/' + cid, { tarifa: null }, true); // limpieza
   }
 
+  // 9f) Cotizador ruta (TollGuru): el endpoint existe. En CI no hay key → 503;
+  // con key configurada → 200/502. Lo que importa es que NO sea 404.
+  const ruta = await call('POST', '/cotizaciones/ruta', { origen: 'GDL', destino: 'MTY', vehicleType: '5AxlesTruck' }, true);
+  log(ruta.status !== 404 && ruta.status !== 401, 'POST /cotizaciones/ruta (endpoint vivo)', 'status ' + ruta.status);
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
