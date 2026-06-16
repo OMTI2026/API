@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { q } from '../db.js';
-import { canSeeBU } from '../lib/scope.js';
+import { canSeeBU, visibleBUs } from '../lib/scope.js';
 
 const WRITE = ['admin', 'gerente', 'operaciones'];
 
@@ -11,6 +11,20 @@ async function fleteBU(fleteId) {
 
 export default async function gastosRoutes(app) {
   app.addHook('preHandler', app.authenticate);
+
+  // LISTA en bloque (BU-scoped). Sustituye el N+1 que Pago de Proveedores hacía
+  // pidiendo gastos by-flete por cada flete: ahora trae todos los gastos visibles
+  // en UNA request y el front los suma por flete en memoria.
+  app.get('/', async (req) => {
+    const { rows } = await q(
+      `SELECT g.* FROM gastos_extra g
+         JOIN fletes f ON f.id = g.flete_id
+        WHERE f.bu = ANY($1)
+        ORDER BY g.fecha`,
+      [visibleBUs(req.user)],
+    );
+    return rows;
+  });
 
   app.get('/by-flete/:fleteId', async (req, reply) => {
     const f = await fleteBU(req.params.fleteId);

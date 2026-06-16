@@ -1,11 +1,32 @@
 import { z } from 'zod';
-import { q } from '../db.js';
+import { q, withTx } from '../db.js';
 import { visibleBUs, canSeeBU } from '../lib/scope.js';
 
 // Registros de mantenimiento de flota. Cada fila es un checklist diligenciado
 // para una unidad. Sigue el patrón de documentos.routes.js / carriers.routes.js.
 
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
+
+// Siguiente folio de Orden de Trabajo (OT001, OT002, …) consecutivo por BU.
+// Se calcula sobre data->>'folioOt' de los registros existentes. Debe correr
+// dentro de una transacción con advisory lock para evitar duplicados en
+// altas concurrentes.
+async function nextFolioOt(client, bu) {
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['mant_folio_ot_' + bu]);
+  const { rows } = await client.query(
+    "SELECT data->>'folioOt' AS folio FROM mantenimientos WHERE bu = $1",
+    [bu],
+  );
+  let max = 0;
+  for (const r of rows) {
+    const m = /^OT(\d+)$/.exec(r.folio || '');
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  return 'OT' + String(max + 1).padStart(3, '0');
+}
 
 const createSchema = z.object({
   bu: buEnum,
@@ -34,12 +55,18 @@ export default async function mantenimientosRoutes(app) {
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     if (!canSeeBU(req.user, p.data.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     const d = p.data;
-    const { rows } = await q(
-      `INSERT INTO mantenimientos (bu, checklist_id, referencia, data)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [d.bu, d.checklist_id, d.referencia, d.data ?? {}],
-    );
-    return rows[0];
+    // Folio OT autogenerado y consecutivo (se ignora lo que mande el cliente).
+    const row = await withTx(async (client) => {
+      const folioOt = await nextFolioOt(client, d.bu);
+      const data = { ...(d.data ?? {}), folioOt };
+      const { rows } = await client.query(
+        `INSERT INTO mantenimientos (bu, checklist_id, referencia, data)
+         VALUES ($1,$2,$3,$4) RETURNING *`,
+        [d.bu, d.checklist_id, d.referencia, data],
+      );
+      return rows[0];
+    });
+    return row;
   });
 
   app.put('/:id', { preHandler: [app.requirePerm('mantenimiento', 'edit')] }, async (req, reply) => {

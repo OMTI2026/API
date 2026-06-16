@@ -80,6 +80,14 @@ async function main() {
   const lst = await call('GET', '/fletes', null, true);
   log(lst.status === 200 && Array.isArray(lst.data), 'GET /fletes', 'n=' + (Array.isArray(lst.data) ? lst.data.length : '?'));
 
+  // 8b) Listas en bloque que Cobranza/Pagos usan para armar la tabla sin N+1.
+  const cxpL = await call('GET', '/cxp', null, true);
+  log(cxpL.status === 200 && Array.isArray(cxpL.data), 'GET /cxp (lista)', 'n=' + (Array.isArray(cxpL.data) ? cxpL.data.length : '?'));
+  const cxcL = await call('GET', '/cxc', null, true);
+  log(cxcL.status === 200 && Array.isArray(cxcL.data), 'GET /cxc (lista)', 'n=' + (Array.isArray(cxcL.data) ? cxcL.data.length : '?'));
+  const gL = await call('GET', '/gastos', null, true);
+  log(gL.status === 200 && Array.isArray(gL.data), 'GET /gastos (lista)', 'n=' + (Array.isArray(gL.data) ? gL.data.length : '?'));
+
   // 9) Dashboard
   const dash = await call('GET', '/stats/dashboard', null, true);
   const okDash = dash.status === 200 && dash.data
@@ -99,6 +107,42 @@ async function main() {
   if (goCreate.data && goCreate.data.id) gastoOpId = goCreate.data.id;
   const goList = await call('GET', '/gastos-operativos', null, true);
   log(goList.status === 200 && Array.isArray(goList.data), 'GET /gastos-operativos', 'n=' + (Array.isArray(goList.data) ? goList.data.length : '?'));
+
+  // 9c) Mantenimiento: alta asigna Folio OT autogenerado (OT\d+). Limpieza al final.
+  let mantId = null;
+  const mantCreate = await call('POST', '/mantenimientos', {
+    bu: 'broker', checklist_id: 'smoke-test', referencia: 'SMOKE-1',
+  }, true);
+  const folioOk = mantCreate.status === 200 && mantCreate.data && /^OT\d+$/.test(mantCreate.data.data?.folioOt || '');
+  log(folioOk, 'POST /mantenimientos (Folio OT auto)', mantCreate.data?.data?.folioOt);
+  if (mantCreate.data && mantCreate.data.id) mantId = mantCreate.data.id;
+
+  // 9d) Cotización: alta + lista. Limpieza al final.
+  let cotizId = null;
+  const cotCreate = await call('POST', '/cotizaciones', {
+    bu: 'broker', origen: 'GDL', destino: 'MTY', precio: 12345.67,
+    data: { distanciaKm: 800, casetasTotal: 1500 },
+  }, true);
+  log(cotCreate.status === 200 && cotCreate.data && cotCreate.data.id, 'POST /cotizaciones');
+  if (cotCreate.data && cotCreate.data.id) cotizId = cotCreate.data.id;
+  const cotList = await call('GET', '/cotizaciones', null, true);
+  log(cotList.status === 200 && Array.isArray(cotList.data), 'GET /cotizaciones', 'n=' + (Array.isArray(cotList.data) ? cotList.data.length : '?'));
+
+  // 9e) Casetas: el catálogo de la RNC quedó sembrado (>1000) + actualizar tarifa.
+  const casList = await call('GET', '/casetas?q=carbonera', null, true);
+  const casOk = casList.status === 200 && Array.isArray(casList.data) && casList.data.length > 0;
+  log(casOk, 'GET /casetas?q=carbonera', 'n=' + (Array.isArray(casList.data) ? casList.data.length : '?'));
+  if (casOk) {
+    const cid = casList.data[0].id;
+    const upd = await call('PUT', '/casetas/' + cid, { tarifa: 123.45 }, true);
+    log(upd.status === 200 && Number(upd.data?.tarifa) === 123.45, 'PUT /casetas/:id (tarifa)');
+    await call('PUT', '/casetas/' + cid, { tarifa: null }, true); // limpieza
+  }
+
+  // 9f) Cotizador ruta (TollGuru): el endpoint existe. En CI no hay key → 503;
+  // con key configurada → 200/502. Lo que importa es que NO sea 404.
+  const ruta = await call('POST', '/cotizaciones/ruta', { origen: 'GDL', destino: 'MTY', vehicleType: '5AxlesTruck' }, true);
+  log(ruta.status !== 404 && ruta.status !== 401, 'POST /cotizaciones/ruta (endpoint vivo)', 'status ' + ruta.status);
 
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
@@ -121,6 +165,18 @@ async function main() {
   if (gastoOpId) {
     const del = await call('DELETE', '/gastos-operativos/' + gastoOpId, null, true);
     log(del.status === 200, 'DELETE /gastos-operativos/:id (limpieza)');
+  }
+
+  // 11c) Limpieza del mantenimiento de prueba
+  if (mantId) {
+    const del = await call('DELETE', '/mantenimientos/' + mantId, null, true);
+    log(del.status === 200, 'DELETE /mantenimientos/:id (limpieza)');
+  }
+
+  // 11d) Limpieza de la cotización de prueba
+  if (cotizId) {
+    const del = await call('DELETE', '/cotizaciones/' + cotizId, null, true);
+    log(del.status === 200, 'DELETE /cotizaciones/:id (limpieza)');
   }
 
   finish();
