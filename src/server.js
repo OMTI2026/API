@@ -33,6 +33,7 @@ import gastosOperativosRoutes from './routes/gastos-operativos.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import casetasRoutes from './routes/casetas.routes.js';
 import combustibleRoutes from './routes/combustible.routes.js';
+import llantasRoutes from './routes/llantas.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -79,6 +80,7 @@ export async function build() {
   await app.register(cotizacionesRoutes, { prefix: '/cotizaciones' });
   await app.register(casetasRoutes, { prefix: '/casetas' });
   await app.register(combustibleRoutes, { prefix: '/combustible' });
+  await app.register(llantasRoutes, { prefix: '/llantas' });
 
   return app;
 }
