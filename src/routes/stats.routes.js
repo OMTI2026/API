@@ -1,6 +1,14 @@
 import { q } from '../db.js';
 import { visibleBUs } from '../lib/scope.js';
 
+// BUs a considerar: si la petición pide ?bu= y el usuario puede verla, se limita
+// a esa unidad (separación Flota/Broker del dashboard); si no, todas las visibles.
+function scopedBUs(req) {
+  const all = visibleBUs(req.user);
+  const bu = req.query?.bu;
+  return bu && all.includes(bu) ? [bu] : all;
+}
+
 export default async function statsRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
@@ -12,7 +20,7 @@ export default async function statsRoutes(app) {
   //                20 Siniestro ('siniestro'). En ambos casos se excluyen los
   //                cancelados. Mes y año por created_at.
   app.get('/dashboard', async (req) => {
-    const bus = visibleBUs(req.user);
+    const bus = scopedBUs(req);
     const { rows } = await q(
       `WITH base AS (
          SELECT f.id, f.status, f.created_at,
@@ -59,7 +67,7 @@ export default async function statsRoutes(app) {
           AND date_trunc('year', created_at) = date_trunc('year', now())
         GROUP BY 1
         ORDER BY 1`,
-      [visibleBUs(req.user)],
+      [scopedBUs(req)],
     );
     return rows;
   });
@@ -81,7 +89,7 @@ export default async function statsRoutes(app) {
           AND date_trunc('year', created_at) = date_trunc('year', now())
         GROUP BY 1
         ORDER BY 1`,
-      [visibleBUs(req.user)],
+      [scopedBUs(req)],
     );
     return rows;
   });
@@ -90,7 +98,7 @@ export default async function statsRoutes(app) {
   app.get('/historico', async (req) => {
     const { rows } = await q(
       'SELECT * FROM stats_historico WHERE bu = ANY($1) ORDER BY mes DESC',
-      [visibleBUs(req.user)],
+      [scopedBUs(req)],
     );
     return rows;
   });

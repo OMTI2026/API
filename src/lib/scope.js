@@ -1,7 +1,12 @@
 // Devuelve las BUs visibles para el usuario.
 // 'ambos' ve broker y flota; un rol fijo ve solo la suya.
+// Si el cliente envió una unidad ACTIVA (header X-Active-BU) que el usuario puede
+// ver, se acota a esa unidad — así Flota y Broker NUNCA mezclan registros en
+// ningún endpoint que use visibleBUs.
 export function visibleBUs(user) {
-  return user.bu === 'ambos' ? ['broker', 'flota'] : [user.bu];
+  const base = user.bu === 'ambos' ? ['broker', 'flota'] : [user.bu];
+  if (user && user.activeBU && base.includes(user.activeBU)) return [user.activeBU];
+  return base;
 }
 
 // Helper para construir el filtro WHERE bu = ANY($n)
