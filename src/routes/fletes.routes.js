@@ -137,6 +137,31 @@ export default async function fletesRoutes(app) {
     return rows[0];
   });
 
+  // Gastos en efectivo del viaje (Flota): casetas, maniobras, viáticos… Se
+  // pueden registrar ANTES y DURANTE el viaje, por eso este endpoint es
+  // append-only y NO se bloquea aunque el servicio ya esté liberado (a
+  // diferencia del PUT). Reemplaza data.gastosViaje con la lista enviada.
+  const gastosViajeSchema = z.object({
+    gastos: z.array(z.object({
+      concepto: z.string().optional().nullable(),
+      monto: z.number().optional().nullable(),
+      fecha: z.string().optional().nullable(),
+    })),
+  });
+  app.put('/:id/gastos-viaje', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
+    const p = gastosViajeSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const { rows } = await q(
+      `UPDATE fletes SET data = data || jsonb_build_object('gastosViaje', $2::jsonb), updated_at = now()
+         WHERE id = $1 RETURNING *`,
+      [req.params.id, JSON.stringify(p.data.gastos)],
+    );
+    return rows[0];
+  });
+
   // Estado de monitoreo (status + data.mon) — operaciones
   const monSchema = z.object({ status: z.string().optional(), mon_finalizado: z.boolean().optional(), data: z.record(z.any()).optional() });
   app.patch('/:id/monitoreo', { preHandler: [app.requirePerm('monitoreo', 'edit')] }, async (req, reply) => {
