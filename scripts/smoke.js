@@ -89,6 +89,8 @@ async function main() {
   log(gL.status === 200 && Array.isArray(gL.data), 'GET /gastos (lista)', 'n=' + (Array.isArray(gL.data) ? gL.data.length : '?'));
   const ccL = await call('GET', '/casetas-cargas', null, true);
   log(ccL.status === 200 && Array.isArray(ccL.data), 'GET /casetas-cargas (lista)', 'n=' + (Array.isArray(ccL.data) ? ccL.data.length : '?'));
+  const cpL = await call('GET', '/casetas-pagos', null, true);
+  log(cpL.status === 200 && Array.isArray(cpL.data), 'GET /casetas-pagos (lista)', 'n=' + (Array.isArray(cpL.data) ? cpL.data.length : '?'));
 
   // 9) Dashboard
   const dash = await call('GET', '/stats/dashboard', null, true);
