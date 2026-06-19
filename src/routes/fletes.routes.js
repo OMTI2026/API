@@ -137,6 +137,60 @@ export default async function fletesRoutes(app) {
     return rows[0];
   });
 
+  // Gastos en efectivo del viaje (Flota): casetas, maniobras, viáticos… Se
+  // pueden registrar ANTES y DURANTE el viaje, por eso este endpoint es
+  // append-only y NO se bloquea aunque el servicio ya esté liberado (a
+  // diferencia del PUT). Reemplaza data.gastosViaje con la lista enviada.
+  const gastosViajeSchema = z.object({
+    gastos: z.array(z.object({
+      concepto: z.string().optional().nullable(),
+      monto: z.number().optional().nullable(),
+      fecha: z.string().optional().nullable(),
+    })),
+  });
+  app.put('/:id/gastos-viaje', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
+    const p = gastosViajeSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const { rows } = await q(
+      `UPDATE fletes SET data = data || jsonb_build_object('gastosViaje', $2::jsonb), updated_at = now()
+         WHERE id = $1 RETURNING *`,
+      [req.params.id, JSON.stringify(p.data.gastos)],
+    );
+    return rows[0];
+  });
+
+  // Odómetro inicial/final del viaje (Flota). Editable DURANTE el viaje aunque el
+  // servicio esté liberado (el km final se lee al terminar), PERO se bloquea una
+  // vez capturado el status 19 / mon_finalizado: ahí queda fijo (km final).
+  const odoSchema = z.object({
+    odometroInicial: z.number().optional().nullable(),
+    odometroFinal: z.number().optional().nullable(),
+  });
+  app.put('/:id/odometro-viaje', { preHandler: [app.requirePerm('fletes', 'edit')] }, async (req, reply) => {
+    const p = odoSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const cur = await q(
+      `SELECT bu, (data->>'monStatus') AS mon, mon_finalizado FROM fletes WHERE id = $1`,
+      [req.params.id],
+    );
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (cur.rows[0].mon === 'finalizado' || cur.rows[0].mon_finalizado === true) {
+      return reply.code(403).send({ error: 'flete_finalizado', detail: 'El odómetro queda fijo al finalizar el servicio (status 19).' });
+    }
+    const patch = {};
+    if (p.data.odometroInicial !== undefined) patch.odometroInicial = p.data.odometroInicial;
+    if (p.data.odometroFinal !== undefined) patch.odometroFinal = p.data.odometroFinal;
+    const { rows } = await q(
+      `UPDATE fletes SET data = data || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *`,
+      [req.params.id, JSON.stringify(patch)],
+    );
+    return rows[0];
+  });
+
   // Estado de monitoreo (status + data.mon) — operaciones
   const monSchema = z.object({ status: z.string().optional(), mon_finalizado: z.boolean().optional(), data: z.record(z.any()).optional() });
   app.patch('/:id/monitoreo', { preHandler: [app.requirePerm('monitoreo', 'edit')] }, async (req, reply) => {

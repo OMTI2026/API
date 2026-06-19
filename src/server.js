@@ -32,6 +32,7 @@ import mantenimientosRoutes from './routes/mantenimientos.routes.js';
 import gastosOperativosRoutes from './routes/gastos-operativos.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import casetasRoutes from './routes/casetas.routes.js';
+import casetasCargasRoutes from './routes/casetasCargas.routes.js';
 import combustibleRoutes from './routes/combustible.routes.js';
 import llantasRoutes from './routes/llantas.routes.js';
 
@@ -79,6 +80,7 @@ export async function build() {
   await app.register(gastosOperativosRoutes, { prefix: '/gastos-operativos' });
   await app.register(cotizacionesRoutes, { prefix: '/cotizaciones' });
   await app.register(casetasRoutes, { prefix: '/casetas' });
+  await app.register(casetasCargasRoutes, { prefix: '/casetas-cargas' });
   await app.register(combustibleRoutes, { prefix: '/combustible' });
   await app.register(llantasRoutes, { prefix: '/llantas' });
 
