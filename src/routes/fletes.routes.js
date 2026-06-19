@@ -66,12 +66,21 @@ export default async function fletesRoutes(app) {
     const d = p.data;
 
     const flete = await withTx(async (client) => {
-      // Folio ELROI automatico: si no viene del cliente, se genera "ELR" + un
-      // consecutivo (arranca en 5829). Se hace DENTRO de la transaccion y
-      // serializado con un advisory lock a nivel transaccion, de modo que dos
-      // altas simultaneas no puedan generar el mismo folio (evita duplicidad).
+      // Folio automatico por unidad de negocio (si no viene del cliente):
+      //   - Flota Propia: "TR" + consecutivo de 3 digitos, arranca en TR001.
+      //   - Broker:       "ELR" + consecutivo, arranca en 5829.
+      // Se hace DENTRO de la transaccion y serializado con un advisory lock a
+      // nivel transaccion, de modo que dos altas simultaneas no generen el mismo
+      // folio (cada BU lleva su propia secuencia y su propio lock).
       let folio = d.folio ?? null;
-      if (!folio) {
+      if (!folio && d.bu === 'flota') {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', ['flete_folio_seq_flota']);
+        const { rows: nf } = await client.query(
+          `SELECT GREATEST(1, COALESCE(MAX((substring(folio from '^TR([0-9]+)$'))::int), 0) + 1) AS next
+             FROM fletes WHERE bu = 'flota' AND folio ~ '^TR[0-9]+$'`,
+        );
+        folio = 'TR' + String(nf[0].next).padStart(3, '0');
+      } else if (!folio) {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', ['flete_folio_seq']);
         const { rows: nf } = await client.query(
           `SELECT GREATEST(5829, COALESCE(MAX((substring(folio from '^ELR([0-9]+)$'))::int), 5828) + 1) AS next
