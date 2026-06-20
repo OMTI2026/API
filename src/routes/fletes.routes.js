@@ -219,6 +219,12 @@ export default async function fletesRoutes(app) {
     checklist: z.record(z.any()).optional(),
     autorizado: z.boolean().optional(),
     fecha_autorizacion: z.string().optional(),
+    // Siembra de monitoreo ATÓMICA: al autorizar, el front manda aquí el estatus
+    // inicial (confirmado) + su historial, para que checklistAutorizado y monStatus
+    // queden en la MISMA escritura (bajo permiso `checklist`). Antes eran dos
+    // llamadas (la 2ª exigía `monitoreo` y, si fallaba por permiso o red en la
+    // tablet, el servicio quedaba autorizado pero atorado en "pendiente").
+    mon: z.object({ status: z.string().optional(), historial: z.array(z.any()).optional() }).optional(),
   });
   app.patch('/:id/checklist', { preHandler: [app.requirePerm('checklist', 'edit')] }, async (req, reply) => {
     const p = checklistSchema.safeParse(req.body);
@@ -232,6 +238,10 @@ export default async function fletesRoutes(app) {
     if (d.checklist !== undefined) patch.checklist = d.checklist;
     if (d.autorizado !== undefined) patch.checklistAutorizado = d.autorizado;
     if (d.fecha_autorizacion !== undefined) patch.checklistFechaAut = d.fecha_autorizacion;
+    if (d.mon) {
+      if (d.mon.status !== undefined) patch.monStatus = d.mon.status;
+      if (d.mon.historial !== undefined) patch.monHistorial = d.mon.historial;
+    }
     const { rows } = await q(
       `UPDATE fletes SET data = data || $2::jsonb, updated_at = now()
        WHERE id = $1 RETURNING *`,
