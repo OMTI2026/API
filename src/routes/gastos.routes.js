@@ -69,14 +69,18 @@ export default async function gastosRoutes(app) {
     return { ok: true };
   });
 
-  // Liberar finanzas: requiere monitoreo finalizado y >=1 gasto. Desbloquea CxC/CxP.
+  // Liberar finanzas: requiere monitoreo finalizado. Desbloquea CxC/CxP.
+  // Broker: exige >=1 gasto extra (no se mueve). Flota Propia: liberar sin
+  // capturar es válido y significa que el servicio no tuvo gastos extra.
   app.post('/liberar/:fleteId', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
     const f = await fleteBU(req.params.fleteId);
     if (!f) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, f.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     if (!f.mon_finalizado) return reply.code(409).send({ error: 'monitoreo_no_finalizado' });
-    const { rows: g } = await q('SELECT count(*)::int AS n FROM gastos_extra WHERE flete_id = $1', [req.params.fleteId]);
-    if (g[0].n < 1) return reply.code(409).send({ error: 'sin_gastos' });
+    if (f.bu !== 'flota') {
+      const { rows: g } = await q('SELECT count(*)::int AS n FROM gastos_extra WHERE flete_id = $1', [req.params.fleteId]);
+      if (g[0].n < 1) return reply.code(409).send({ error: 'sin_gastos' });
+    }
     const { rows } = await q('UPDATE fletes SET gastos_liberado = true, updated_at = now() WHERE id = $1 RETURNING *', [req.params.fleteId]);
     return rows[0];
   });
