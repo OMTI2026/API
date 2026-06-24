@@ -13,6 +13,7 @@
     "migrate:status": "node migrations/migrate.js status",
     "seed:admin": "node scripts/seed-admin.js",
     "seed:superadmin": "node scripts/seed-superadmin.js",
+    "seed:demo": "node scripts/seed-demo.js",
     "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
