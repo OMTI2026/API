@@ -22,12 +22,25 @@ export default async function statsRoutes(app) {
   app.get('/dashboard', async (req) => {
     const bus = scopedBUs(req);
     const { rows } = await q(
-      `WITH base AS (
+      `WITH gx AS (
+         -- Gastos extra sumados por flete: cobro es la contraparte de VENTA del
+         -- gasto adicional (se cobra al cliente) y pago el costo al proveedor.
+         SELECT flete_id,
+                SUM(COALESCE(cobro,0)) AS g_cobro,
+                SUM(COALESCE(pago,0))  AS g_pago
+         FROM gastos_extra
+         GROUP BY flete_id
+       ),
+       base AS (
          SELECT f.id, f.status, f.created_at,
                 f.data->>'monStatus' AS mon,
-                COALESCE(f.tarifa_cobro,0) AS cobro,
-                COALESCE(f.tarifa_cobro,0) - COALESCE(f.tarifa_pago,0) AS util
+                -- Venta = tarifa de flete + cobro de gastos adicionales.
+                COALESCE(f.tarifa_cobro,0) + COALESCE(gx.g_cobro,0) AS cobro,
+                -- Utilidad = (tarifa_cobro − tarifa_pago) + (cobro − pago) de gastos.
+                (COALESCE(f.tarifa_cobro,0) - COALESCE(f.tarifa_pago,0))
+                  + (COALESCE(gx.g_cobro,0) - COALESCE(gx.g_pago,0)) AS util
          FROM fletes f
+         LEFT JOIN gx ON gx.flete_id = f.id
          WHERE f.bu = ANY($1)
        )
        SELECT
@@ -56,15 +69,18 @@ export default async function statsRoutes(app) {
   // utilidad PROYECTADA por mes), a diferencia del histórico (ya cerrado).
   app.get('/proyeccion-mensual', async (req) => {
     const { rows } = await q(
-      `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
-              COALESCE(SUM(COALESCE(tarifa_cobro,0)),0)                                  AS venta,
-              COALESCE(SUM(COALESCE(tarifa_cobro,0) - COALESCE(tarifa_pago,0)),0)         AS util,
+      `SELECT to_char(date_trunc('month', f.created_at), 'YYYY-MM') AS mes,
+              COALESCE(SUM(COALESCE(f.tarifa_cobro,0) + COALESCE(gx.g_cobro,0)),0)        AS venta,
+              COALESCE(SUM((COALESCE(f.tarifa_cobro,0) - COALESCE(f.tarifa_pago,0))
+                           + (COALESCE(gx.g_cobro,0) - COALESCE(gx.g_pago,0))),0)         AS util,
               COUNT(*)                                                                   AS viajes
-         FROM fletes
-        WHERE bu = ANY($1)
-          AND status <> 'cancelado'
-          AND data->>'monStatus' NOT IN ('finalizado','siniestro')
-          AND date_trunc('year', created_at) = date_trunc('year', now())
+         FROM fletes f
+         LEFT JOIN (SELECT flete_id, SUM(COALESCE(cobro,0)) AS g_cobro, SUM(COALESCE(pago,0)) AS g_pago
+                      FROM gastos_extra GROUP BY flete_id) gx ON gx.flete_id = f.id
+        WHERE f.bu = ANY($1)
+          AND f.status <> 'cancelado'
+          AND f.data->>'monStatus' NOT IN ('finalizado','siniestro')
+          AND date_trunc('year', f.created_at) = date_trunc('year', now())
         GROUP BY 1
         ORDER BY 1`,
       [scopedBUs(req)],
@@ -78,15 +94,18 @@ export default async function statsRoutes(app) {
   // proyección vive en /proyeccion-mensual y en los KPIs proy_* de /dashboard).
   app.get('/real-mensual', async (req) => {
     const { rows } = await q(
-      `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
-              COALESCE(SUM(COALESCE(tarifa_cobro,0)),0)                                  AS venta,
-              COALESCE(SUM(COALESCE(tarifa_cobro,0) - COALESCE(tarifa_pago,0)),0)         AS util,
+      `SELECT to_char(date_trunc('month', f.created_at), 'YYYY-MM') AS mes,
+              COALESCE(SUM(COALESCE(f.tarifa_cobro,0) + COALESCE(gx.g_cobro,0)),0)        AS venta,
+              COALESCE(SUM((COALESCE(f.tarifa_cobro,0) - COALESCE(f.tarifa_pago,0))
+                           + (COALESCE(gx.g_cobro,0) - COALESCE(gx.g_pago,0))),0)         AS util,
               COUNT(*)                                                                   AS viajes
-         FROM fletes
-        WHERE bu = ANY($1)
-          AND status <> 'cancelado'
-          AND data->>'monStatus' = 'finalizado'
-          AND date_trunc('year', created_at) = date_trunc('year', now())
+         FROM fletes f
+         LEFT JOIN (SELECT flete_id, SUM(COALESCE(cobro,0)) AS g_cobro, SUM(COALESCE(pago,0)) AS g_pago
+                      FROM gastos_extra GROUP BY flete_id) gx ON gx.flete_id = f.id
+        WHERE f.bu = ANY($1)
+          AND f.status <> 'cancelado'
+          AND f.data->>'monStatus' = 'finalizado'
+          AND date_trunc('year', f.created_at) = date_trunc('year', now())
         GROUP BY 1
         ORDER BY 1`,
       [scopedBUs(req)],
