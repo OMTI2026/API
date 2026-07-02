@@ -5,7 +5,7 @@ import { env } from '../env.js';
 import { hashPassword, verifyPassword } from '../lib/argon.js';
 import { signAccess } from '../lib/jwt.js';
 import { newRefreshToken, hashToken } from '../lib/tokens.js';
-import { effectivePerms } from '../lib/permissions.js';
+import { effectivePerms, effectiveCapabilities } from '../lib/permissions.js';
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
@@ -22,7 +22,7 @@ function refreshCookieOpts() {
 }
 
 function publicUser(u) {
-  return { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, bu: u.bu, permissions: effectivePerms(u) };
+  return { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, bu: u.bu, permissions: effectivePerms(u), capabilities: effectiveCapabilities(u) };
 }
 
 async function issueRefresh(userId, userAgent) {
@@ -155,10 +155,10 @@ export default async function authRoutes(app) {
 
   // ── ME ─────────────────────────────────────────────────
   app.get('/me', { preHandler: [app.authenticate] }, async (req) => {
-    const { rows } = await q('SELECT id, nombre, email, rol, bu, permissions, must_change_password, totp_secret IS NOT NULL AS has_2fa FROM users WHERE id = $1', [req.user.id]);
+    const { rows } = await q('SELECT id, nombre, email, rol, bu, permissions, capabilities, must_change_password, totp_secret IS NOT NULL AS has_2fa FROM users WHERE id = $1', [req.user.id]);
     const u = rows[0];
     if (!u) return null;
-    return { ...u, permissions: effectivePerms(u) };
+    return { ...u, permissions: effectivePerms(u), capabilities: effectiveCapabilities(u) };
   });
 
   // ── CAMBIO DE CONTRASEÑA ───────────────────────────────

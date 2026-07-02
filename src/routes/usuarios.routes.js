@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { q } from '../db.js';
 import { hashPassword } from '../lib/argon.js';
-import { effectivePerms, diffOverrides, LEVELS } from '../lib/permissions.js';
+import { effectivePerms, effectiveCapabilities, sanitizeCapabilities, diffOverrides, LEVELS } from '../lib/permissions.js';
 
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
 const rolEnum = z.enum(['admin', 'gerente', 'operaciones', 'finanzas', 'readonly']);
 // Mapa de permisos EFECTIVO que arma la UI (módulo -> nivel). Se guarda como
 // overrides (diff vs el preset del rol) en la columna users.permissions.
 const permsSchema = z.record(z.enum(LEVELS)).optional();
+// Capacidades finas por usuario (flags booleanos). Se sanean a las claves
+// conocidas antes de persistir en users.capabilities.
+const capsSchema = z.record(z.boolean()).optional();
 
 export default async function usuariosRoutes(app) {
   // Gestión de usuarios: requiere permiso del módulo 'usuarios' (admin lo tiene
@@ -18,14 +21,14 @@ export default async function usuariosRoutes(app) {
 
   app.get('/', async () => {
     const { rows } = await q(
-      `SELECT id, nombre, email, rol, bu, activo, must_change_password, permissions,
+      `SELECT id, nombre, email, rol, bu, activo, must_change_password, permissions, capabilities,
         totp_secret IS NOT NULL AS has_2fa, created_at
        FROM users ORDER BY created_at DESC`,
     );
     // Devuelve permisos EFECTIVOS (preset del rol + overrides) para la matriz.
     return rows.map((u) => {
       const { permissions, ...rest } = u;
-      return { ...rest, permissions: effectivePerms(u) };
+      return { ...rest, permissions: effectivePerms(u), capabilities: effectiveCapabilities(u) };
     });
   });
 
@@ -36,6 +39,7 @@ export default async function usuariosRoutes(app) {
     rol: rolEnum,
     bu: buEnum,
     permissions: permsSchema,
+    capabilities: capsSchema,
   });
 
   app.post('/', { preHandler: [app.requirePerm('usuarios', 'edit')] }, async (req, reply) => {
@@ -46,17 +50,18 @@ export default async function usuariosRoutes(app) {
     if (dup.rows[0]) return reply.code(409).send({ error: 'email_existe' });
     const hash = await hashPassword(d.password);
     const overrides = diffOverrides(d.rol, d.permissions || {});
+    const caps = sanitizeCapabilities(d.capabilities || {});
     // must_change_password SIEMPRE false: no forzamos cambio de contraseña en el
     // primer acceso (ver migración 0007). El usuario entra con la contraseña que
     // se le asigna aquí.
     const { rows } = await q(
-      `INSERT INTO users (nombre, email, pass_hash, rol, bu, activo, must_change_password, permissions)
-       VALUES ($1,$2,$3,$4,$5,true,false,$6)
-       RETURNING id, nombre, email, rol, bu, activo, must_change_password, permissions, created_at`,
-      [d.nombre, d.email, hash, d.rol, d.bu, JSON.stringify(overrides)],
+      `INSERT INTO users (nombre, email, pass_hash, rol, bu, activo, must_change_password, permissions, capabilities)
+       VALUES ($1,$2,$3,$4,$5,true,false,$6,$7)
+       RETURNING id, nombre, email, rol, bu, activo, must_change_password, permissions, capabilities, created_at`,
+      [d.nombre, d.email, hash, d.rol, d.bu, JSON.stringify(overrides), JSON.stringify(caps)],
     );
     const u = rows[0];
-    return reply.code(201).send({ ...u, permissions: effectivePerms(u) });
+    return reply.code(201).send({ ...u, permissions: effectivePerms(u), capabilities: effectiveCapabilities(u) });
   });
 
   const updateSchema = z.object({
@@ -65,6 +70,7 @@ export default async function usuariosRoutes(app) {
     bu: buEnum.optional(),
     activo: z.boolean().optional(),
     permissions: permsSchema,
+    capabilities: capsSchema,
   });
 
   app.put('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
@@ -88,20 +94,21 @@ export default async function usuariosRoutes(app) {
       }
       overridesJson = JSON.stringify(diffOverrides(rol, d.permissions));
     }
+    const capsJson = d.capabilities !== undefined ? JSON.stringify(sanitizeCapabilities(d.capabilities)) : null;
 
     const { rows } = await q(
       `UPDATE users SET nombre = COALESCE($2,nombre), rol = COALESCE($3,rol),
         bu = COALESCE($4,bu), activo = COALESCE($5,activo),
-        permissions = COALESCE($6, permissions), updated_at = now()
+        permissions = COALESCE($6, permissions), capabilities = COALESCE($7, capabilities), updated_at = now()
        WHERE id = $1
-       RETURNING id, nombre, email, rol, bu, activo, permissions`,
-      [req.params.id, d.nombre ?? null, d.rol ?? null, d.bu ?? null, d.activo ?? null, overridesJson],
+       RETURNING id, nombre, email, rol, bu, activo, permissions, capabilities`,
+      [req.params.id, d.nombre ?? null, d.rol ?? null, d.bu ?? null, d.activo ?? null, overridesJson, capsJson],
     );
     if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
     // Si se desactiva, revoca sus sesiones.
     if (d.activo === false) await q('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [req.params.id]);
     const u = rows[0];
-    return { ...u, permissions: effectivePerms(u) };
+    return { ...u, permissions: effectivePerms(u), capabilities: effectiveCapabilities(u) };
   });
 
   const pwSchema = z.object({ password: z.string().min(8) });
