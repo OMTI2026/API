@@ -262,11 +262,34 @@ export default async function fletesRoutes(app) {
     const cancelacion = { ...p.data, fecha: new Date().toISOString().slice(0, 10) };
     // Cancelar el flete y, en cascada, su Cobranza (CxC) y Pago (CxP): un viaje
     // cancelado deja de contar/afectar venta, cobranza y pagos en TODA vista.
+    // Además se ponen en CERO los montos (tarifa del flete + cobro/pago de sus
+    // gastos_extra) para que no sumen en ningún módulo/KPI; los montos originales
+    // se preservan en data.cancelacion.montos_previos (auditoría/reversible). El
+    // registro sigue apareciendo en los XLS con status CANCELADO y en $0.
     const flete = await withTx(async (client) => {
+      // Snapshot de montos antes de ponerlos en cero.
+      const prev = await client.query(
+        'SELECT tarifa_cobro, tarifa_pago FROM fletes WHERE id = $1', [req.params.id],
+      );
+      const gx = await client.query(
+        'SELECT id, cobro, pago FROM gastos_extra WHERE flete_id = $1', [req.params.id],
+      );
+      const cancelacionFull = {
+        ...cancelacion,
+        montos_previos: {
+          tarifa_cobro: prev.rows[0]?.tarifa_cobro ?? null,
+          tarifa_pago: prev.rows[0]?.tarifa_pago ?? null,
+          gastos: gx.rows.map((g) => ({ id: g.id, cobro: g.cobro, pago: g.pago })),
+        },
+      };
       const { rows } = await client.query(
-        `UPDATE fletes SET status = 'cancelado', data = data || jsonb_build_object('cancelacion', $2::jsonb), updated_at = now()
+        `UPDATE fletes SET status = 'cancelado', tarifa_cobro = 0, tarifa_pago = 0,
+           data = data || jsonb_build_object('cancelacion', $2::jsonb), updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [req.params.id, JSON.stringify(cancelacion)],
+        [req.params.id, JSON.stringify(cancelacionFull)],
+      );
+      await client.query(
+        'UPDATE gastos_extra SET cobro = 0, pago = 0 WHERE flete_id = $1', [req.params.id],
       );
       for (const t of ['cxc', 'cxp']) {
         // t es una whitelist fija (no input de usuario) — seguro interpolar.
