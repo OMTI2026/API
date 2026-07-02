@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { q, withTx } from '../db.js';
 import { visibleBUs, canSeeBU } from '../lib/scope.js';
+import { notifyCapability } from './notifications.routes.js';
 
 const WRITE = ['admin', 'gerente', 'operaciones'];
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
@@ -254,6 +255,31 @@ export default async function fletesRoutes(app) {
          WHERE id = $1 RETURNING *`,
       [req.params.id, nuevoFolioCli, JSON.stringify(patchData)],
     );
+
+    // Notifica a quienes tengan la capacidad 'recibe_avisos_datos_viaje' (no al
+    // autor). Best-effort: si falla, no rompe el guardado.
+    try {
+      const folio = flete.folio || String(flete.id).slice(0, 8);
+      let cliente = '';
+      if (flete.cliente_id) {
+        const cr = await q('SELECT empresa FROM clients WHERE id = $1', [flete.cliente_id]);
+        cliente = cr.rows[0]?.empresa || '';
+      }
+      const resumen = cambios
+        .map((c) => (c.campo === 'folio_cli' ? `Folio cliente: ${c.de || '—'} → ${c.a || '—'}` : `Vueltas/Tiros: ${c.de} → ${c.a}`))
+        .join(' · ');
+      await notifyCapability('recibe_avisos_datos_viaje', req.user.id, {
+        type: 'datos_viaje_edit',
+        title: `${req.user.name || 'Un usuario'} editó datos de viaje`,
+        message: `${folio}${cliente ? ' · ' + cliente : ''} — ${resumen}`,
+        entityType: 'flete',
+        entityId: flete.id,
+        data: { folio, cliente, cambios, by: req.user.id, byNombre: req.user.name || null },
+      });
+    } catch (err) {
+      req.log?.warn?.({ err }, 'no se pudo crear la notificación de datos de viaje');
+    }
+
     return rows[0];
   });
 
