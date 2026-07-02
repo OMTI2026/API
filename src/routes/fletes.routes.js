@@ -191,6 +191,72 @@ export default async function fletesRoutes(app) {
     return rows[0];
   });
 
+  // Datos de viaje editables tras liberar (capacidad fina 'editar_datos_viaje'):
+  // folio de cliente y vueltas/tiros de Ingram. A diferencia del PUT /:id, NO se
+  // bloquea por servicio liberado ni por finalizado — son correcciones operativas
+  // acotadas (p.ej. el folio del cliente llega tarde). Registra una bitácora en
+  // data.datosViajeLog (quién, cuándo, qué cambió) para avisar a quien tenga la
+  // capacidad 'recibe_avisos_datos_viaje' (entrega de la notificación: Fase 2).
+  const datosViajeSchema = z.object({
+    folio_cli: z.string().optional().nullable(),
+    ingramVueltas: z.array(z.object({ tiros: z.array(z.string()) })).optional(),
+  });
+  app.put('/:id/datos-viaje', { preHandler: [app.requireCapability('editar_datos_viaje')] }, async (req, reply) => {
+    const p = datosViajeSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const cur = await q('SELECT * FROM fletes WHERE id = $1', [req.params.id]);
+    const flete = cur.rows[0];
+    if (!flete) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, flete.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+
+    const prevData = flete.data || {};
+    const cambios = [];
+    let nuevoFolioCli = null; // null -> no tocar la columna (COALESCE la conserva)
+
+    if (p.data.folio_cli !== undefined) {
+      const nuevo = p.data.folio_cli || null;
+      const viejo = flete.folio_cli || null;
+      if (String(nuevo || '') !== String(viejo || '')) {
+        cambios.push({ campo: 'folio_cli', de: viejo, a: nuevo });
+        nuevoFolioCli = nuevo;
+      }
+    }
+
+    const patchData = {};
+    if (p.data.ingramVueltas !== undefined) {
+      const limpio = p.data.ingramVueltas.map((v) => ({
+        tiros: (v.tiros || []).map((t) => String(t).trim()).filter(Boolean),
+      }));
+      const prevVueltas = Array.isArray(prevData.ingramVueltas) ? prevData.ingramVueltas : [];
+      if (JSON.stringify(limpio) !== JSON.stringify(prevVueltas)) {
+        const cuenta = (arr) => arr.reduce((a, v) => a + (v.tiros?.length || 0), 0);
+        cambios.push({
+          campo: 'ingramVueltas',
+          de: `${prevVueltas.length} vueltas / ${cuenta(prevVueltas)} tiros`,
+          a: `${limpio.length} vueltas / ${cuenta(limpio)} tiros`,
+        });
+        patchData.ingramVueltas = limpio;
+      }
+    }
+
+    // Nada cambió: devuelve el servicio tal cual, sin escribir ni auditar.
+    if (!cambios.length) return flete;
+
+    // Bitácora de auditoría (append, con tope de 50 entradas).
+    const prevLog = Array.isArray(prevData.datosViajeLog) ? prevData.datosViajeLog : [];
+    patchData.datosViajeLog = [
+      ...prevLog,
+      { at: new Date().toISOString(), by: req.user.id, byNombre: req.user.name || null, cambios },
+    ].slice(-50);
+
+    const { rows } = await q(
+      `UPDATE fletes SET folio_cli = COALESCE($2, folio_cli), data = data || $3::jsonb, updated_at = now()
+         WHERE id = $1 RETURNING *`,
+      [req.params.id, nuevoFolioCli, JSON.stringify(patchData)],
+    );
+    return rows[0];
+  });
+
   // Estado de monitoreo (status + data.mon) — operaciones
   const monSchema = z.object({ status: z.string().optional(), mon_finalizado: z.boolean().optional(), data: z.record(z.any()).optional() });
   app.patch('/:id/monitoreo', { preHandler: [app.requirePerm('monitoreo', 'edit')] }, async (req, reply) => {
