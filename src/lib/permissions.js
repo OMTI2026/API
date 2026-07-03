@@ -108,7 +108,7 @@ export function hasPerm(perms, module, level) {
 // otorgan implícitamente a admin: el guard requireCapability ya deja pasar a
 // admin en los endpoints, y quien las CONSUME por consulta (p.ej. destinatarios
 // de avisos) debe ser explícito, no todos los admins.
-export const CAPABILITIES = ['editar_datos_viaje', 'recibe_avisos_datos_viaje'];
+export const CAPABILITIES = ['editar_datos_viaje', 'recibe_avisos_datos_viaje', 'recibe_alertas_flota'];
 
 // Mapa efectivo de capacidades (solo las claves conocidas, como booleanos).
 export function effectiveCapabilities(user) {

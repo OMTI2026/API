@@ -24,6 +24,10 @@ const schema = z.object({
   // Sentry (opcional). Sin DSN, el monitoreo queda inactivo (ver src/instrument.js).
   SENTRY_DSN: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+
+  // Token del endpoint /cron/check-alerts (avisos proactivos de flota). Sin él,
+  // el endpoint responde 401 y no genera avisos. Lo dispara Railway cron.
+  CRON_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
