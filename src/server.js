@@ -11,6 +11,7 @@ import { env } from './env.js';
 import authPlugin from './plugins/auth.js';
 import rbacPlugin from './plugins/rbac.js';
 import healthRoutes from './routes/health.routes.js';
+import cronRoutes from './routes/cron.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import clientsRoutes from './routes/clients.routes.js';
@@ -61,6 +62,7 @@ export async function build() {
   await app.register(rbacPlugin);
 
   await app.register(healthRoutes);
+  await app.register(cronRoutes, { prefix: '/cron' });
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(uploadRoutes, { prefix: '/upload' });
   await app.register(clientsRoutes, { prefix: '/clients' });

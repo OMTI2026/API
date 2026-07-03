@@ -65,3 +65,27 @@ export async function notifyCapability(cap, exceptUserId, { type, title, message
   );
   return rows.length;
 }
+
+// Como notifyCapability, pero IDEMPOTENTE por `dedupeKey`: no vuelve a crear el
+// aviso para un usuario que ya tiene uno NO leído con la misma clave. Sirve para
+// jobs periódicos (cron) que no deben spamear la misma alerta en cada corrida.
+// La `dedupeKey` se guarda dentro de `data` para poder cotejarla.
+export async function notifyCapabilityOnce(cap, { type, title, message, entityType, entityId, data, dedupeKey }) {
+  const payload = JSON.stringify({ ...(data || {}), dedupeKey });
+  const { rows } = await q(
+    `INSERT INTO notifications (user_id, type, title, message, entity_type, entity_id, data)
+     SELECT u.id, $1, $2, $3, $4, $5, $6::jsonb
+     FROM users u
+     WHERE u.capabilities @> jsonb_build_object($7::text, true)
+       AND u.activo = true
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id = u.id
+           AND n.read_at IS NULL
+           AND n.data->>'dedupeKey' = $8
+       )
+     RETURNING id`,
+    [type, title, message ?? null, entityType ?? null, entityId ?? null, payload, cap, dedupeKey],
+  );
+  return rows.length;
+}
