@@ -61,4 +61,17 @@ export default fp(async function rbacPlugin(app) {
       req.perms = perms;
     };
   });
+
+  // Capacidad fina por usuario (flag booleano en users.capabilities), separada de
+  // la matriz de módulos. admin pasa siempre (superusuario). Ver lib/permissions.
+  app.decorate('requireCapability', function (cap) {
+    return async function (req, reply) {
+      if (!req.user) return reply.code(401).send({ error: 'unauthenticated' });
+      const { rows } = await q('SELECT rol, capabilities, activo FROM users WHERE id = $1', [req.user.id]);
+      const u = rows[0];
+      if (!u || u.activo === false) return reply.code(401).send({ error: 'user_inactive' });
+      if (u.rol === 'admin' || u.capabilities?.[cap] === true) return;
+      return reply.code(403).send({ error: 'forbidden_capability', need: cap });
+    };
+  });
 });
