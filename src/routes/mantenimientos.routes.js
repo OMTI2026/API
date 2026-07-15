@@ -1,11 +1,19 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
+import { env } from '../env.js';
 import { q, withTx } from '../db.js';
 import { visibleBUs, canSeeBU } from '../lib/scope.js';
+import { presignPut, presignGet, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
 // Registros de mantenimiento de flota. Cada fila es un checklist diligenciado
 // para una unidad. Sigue el patrón de documentos.routes.js / carriers.routes.js.
 
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
+
+// Nombre de archivo saneado para la clave en R2 (igual que documentos.routes.js).
+function safeName(name) {
+  return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+}
 
 // Siguiente folio de Orden de Trabajo (OT001, OT002, …) consecutivo por BU.
 // Se calcula sobre data->>'folioOt' de los registros existentes. Debe correr
@@ -86,6 +94,45 @@ export default async function mantenimientosRoutes(app) {
       [req.params.id, d.checklist_id ?? null, d.referencia ?? null, d.data ?? null],
     );
     return rows[0];
+  });
+
+  // ── Fotos del registro (p. ej. evidencia de la inspección diaria) ───────────
+  // Patrón autocontenido sign→PUT→url (como documentos/foto/*). Las referencias
+  // {key,filename,mime} se guardan luego en data.fotos al crear/editar.
+  const fotoSignSchema = z.object({
+    filename: z.string().min(1),
+    mime: z.string().min(1),
+    bytes: z.number().int().positive(),
+  });
+
+  app.post('/foto/sign', { preHandler: [app.requirePerm('mantenimiento', 'edit')] }, async (req, reply) => {
+    const p = fotoSignSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const { filename, mime, bytes } = p.data;
+    if (!ALLOWED_MIME.has(mime)) return reply.code(415).send({ error: 'mime_no_permitido', allowed: [...ALLOWED_MIME] });
+    if (bytes > MAX_BYTES) return reply.code(413).send({ error: 'archivo_muy_grande', maxBytes: MAX_BYTES });
+    const key = `${env.NODE_ENV}/mantenimientos/${crypto.randomUUID()}-${safeName(filename)}`;
+    try {
+      const url = await presignPut(key, mime);
+      return { key, url, expiresIn: 300 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
+  });
+
+  // URL GET firmada para mostrar una foto. Solo claves del prefijo mantenimientos.
+  app.get('/foto/url', async (req, reply) => {
+    const key = req.query?.key;
+    if (!key || typeof key !== 'string') return reply.code(400).send({ error: 'bad_request' });
+    if (!key.includes('/mantenimientos/')) return reply.code(400).send({ error: 'key_invalida' });
+    try {
+      const url = await presignGet(key);
+      return { url, expiresIn: 600 };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(503).send({ error: 'r2_no_disponible' });
+    }
   });
 
   app.delete('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
