@@ -31,10 +31,18 @@ export default async function carriersRoutes(app) {
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     if (!canSeeBU(req.user, p.data.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     const d = p.data;
+    // Auditoría de alta: estampa QUIÉN creó el proveedor (usuario autenticado del
+    // JWT, confiable) dentro del data JSONB. La columna created_at ya da el CUÁNDO.
+    const data = {
+      ...(d.data ?? {}),
+      creadoPor: req.user.name ?? null,
+      creadoPorId: req.user.id,
+      creadoEn: new Date().toISOString(),
+    };
     const { rows } = await q(
       `INSERT INTO carriers (bu, nombre, rfc, contacto, credito, tiene_gps, data)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [d.bu, d.nombre, d.rfc ?? null, d.contacto ?? null, d.credito ?? null, d.tiene_gps ?? false, d.data ?? {}],
+      [d.bu, d.nombre, d.rfc ?? null, d.contacto ?? null, d.credito ?? null, d.tiene_gps ?? false, data],
     );
     return rows[0];
   });
