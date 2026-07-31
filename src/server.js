@@ -8,6 +8,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 
 import { env } from './env.js';
+import { ensureBucketCors } from './lib/r2.js';
 import authPlugin from './plugins/auth.js';
 import rbacPlugin from './plugins/rbac.js';
 import healthRoutes from './routes/health.routes.js';
@@ -95,11 +96,40 @@ export async function build() {
   return app;
 }
 
+// Verifica (y auto-repara) la CORS del bucket de objetos al arrancar. Tigris ha
+// perdido esta config al menos una vez, dejando TODAS las subidas del navegador
+// bloqueadas hasta re-aplicarla a mano. Aquí lo detectamos y corregimos solos, y
+// avisamos a Sentry cuando hay que reparar (o si falla) para enterarnos sin
+// depender de un reporte de usuarios. Nunca bloquea ni tumba el arranque.
+async function checkBucketCors(app) {
+  try {
+    const res = await ensureBucketCors();
+    if (res.status === 'healed') {
+      app.log.warn('[CORS bucket] auto-reparada: ' + res.detail);
+      if (sentryEnabled) {
+        Sentry.captureMessage('CORS del bucket ausente — auto-reparada al arrancar: ' + res.detail, 'warning');
+      }
+    } else if (res.status === 'error') {
+      app.log.error('[CORS bucket] no se pudo verificar/aplicar: ' + res.detail);
+      if (sentryEnabled) {
+        Sentry.captureMessage('CORS del bucket NO se pudo asegurar (subidas en riesgo): ' + res.detail, 'error');
+      }
+    } else {
+      app.log.info('[CORS bucket] ' + (res.status === 'ok' ? 'OK' : res.detail || res.status));
+    }
+  } catch (err) {
+    app.log.error(err, '[CORS bucket] fallo inesperado en la verificación');
+    if (sentryEnabled) Sentry.captureException(err);
+  }
+}
+
 // Arranque directo (no en tests).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const app = await build();
   try {
     await app.listen({ port: env.PORT, host: '::' });
+    // Tras escuchar (no bloquea el arranque si Tigris tarda o falla).
+    checkBucketCors(app);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
