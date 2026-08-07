@@ -19,6 +19,15 @@ const baseSchema = z.object({
   data: z.record(z.any()).optional(),
 });
 
+const tipoActEnum = z.enum(['llamada', 'correo', 'visita', 'whatsapp', 'reunion', 'nota']);
+const actividadSchema = z.object({
+  tipo: tipoActEnum.optional(),
+  fecha: z.string().optional(), // ISO; por defecto now() en la BD
+  responsable: z.string().optional(),
+  nota: z.string().optional(),
+  data: z.record(z.any()).optional(),
+});
+
 export default async function crmRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
@@ -101,5 +110,72 @@ export default async function crmRoutes(app) {
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     await q('DELETE FROM prospectos WHERE id = $1', [req.params.id]);
     return { ok: true };
+  });
+
+  // ── Bitácora de actividades (Fase 2) ─────────────────────────────────────
+  // Feed global para la vista de dueño: actividades por BU visible, filtrable
+  // por rango de fechas (?desde, ?hasta ISO) y ?responsable. Incluye la empresa
+  // del prospecto. (Ruta estática: no choca con /:id, que no tiene GET.)
+  app.get('/actividades', async (req) => {
+    const params = [visibleBUs(req.user)];
+    let sql = `SELECT a.*, p.empresa
+               FROM prospecto_actividades a
+               JOIN prospectos p ON p.id = a.prospecto_id
+               WHERE a.bu = ANY($1)`;
+    const { desde, hasta, responsable } = req.query || {};
+    if (desde) { params.push(desde); sql += ` AND a.fecha >= $${params.length}`; }
+    if (hasta) { params.push(hasta); sql += ` AND a.fecha < $${params.length}`; }
+    if (responsable) { params.push(responsable); sql += ` AND a.responsable = $${params.length}`; }
+    sql += ' ORDER BY a.fecha DESC LIMIT 500';
+    const { rows } = await q(sql, params);
+    return rows;
+  });
+
+  // Borrar una actividad (limpieza/corrección). Solo admin. (Ruta estática antes
+  // que /:id/…, sin ambigüedad porque tiene dos segmentos.)
+  app.delete('/actividades/:aid', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
+    const cur = await q('SELECT bu FROM prospecto_actividades WHERE id = $1', [req.params.aid]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    await q('DELETE FROM prospecto_actividades WHERE id = $1', [req.params.aid]);
+    return { ok: true };
+  });
+
+  // Línea de tiempo de un prospecto (ficha).
+  app.get('/:id/actividades', async (req, reply) => {
+    const cur = await q('SELECT bu FROM prospectos WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const { rows } = await q(
+      'SELECT * FROM prospecto_actividades WHERE prospecto_id = $1 ORDER BY fecha DESC',
+      [req.params.id],
+    );
+    return rows;
+  });
+
+  // Registrar una actividad; actualiza `ultimo_contacto` del prospecto (semáforo).
+  app.post('/:id/actividades', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
+    const p = actividadSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const cur = await q('SELECT bu FROM prospectos WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const d = p.data;
+    const result = await withTx(async (client) => {
+      const act = await client.query(
+        `INSERT INTO prospecto_actividades (prospecto_id, bu, tipo, fecha, responsable, nota, data)
+         VALUES ($1,$2,$3,COALESCE($4::timestamptz, now()),$5,$6,$7) RETURNING *`,
+        [req.params.id, cur.rows[0].bu, d.tipo ?? 'nota', d.fecha ?? null, d.responsable ?? null, d.nota ?? null, d.data ?? {}],
+      );
+      await client.query(
+        `UPDATE prospectos
+           SET ultimo_contacto = GREATEST(COALESCE(ultimo_contacto, to_timestamp(0)), $2::timestamptz),
+               updated_at = now()
+         WHERE id = $1`,
+        [req.params.id, act.rows[0].fecha],
+      );
+      return act.rows[0];
+    });
+    return result;
   });
 }

@@ -158,6 +158,17 @@ async function main() {
   const prList = await call('GET', '/crm', null, true);
   log(prList.status === 200 && Array.isArray(prList.data), 'GET /crm', 'n=' + (Array.isArray(prList.data) ? prList.data.length : '?'));
   if (prospId) {
+    // Bitácora: registrar una actividad + leer timeline y feed global.
+    const act = await call('POST', '/crm/' + prospId + '/actividades', {
+      tipo: 'llamada', responsable: 'script', nota: 'Smoke: primer contacto',
+    }, true);
+    log(act.status === 200 && act.data && act.data.id, 'POST /crm/:id/actividades');
+    const tl = await call('GET', '/crm/' + prospId + '/actividades', null, true);
+    log(tl.status === 200 && Array.isArray(tl.data) && tl.data.length >= 1, 'GET /crm/:id/actividades (timeline)');
+    const feed = await call('GET', '/crm/actividades', null, true);
+    log(feed.status === 200 && Array.isArray(feed.data), 'GET /crm/actividades (feed)', 'n=' + (Array.isArray(feed.data) ? feed.data.length : '?'));
+  }
+  if (prospId) {
     const conv = await call('POST', '/crm/' + prospId + '/convertir', {}, true);
     const convOk = conv.status === 200 && conv.data?.cliente?.id && conv.data?.prospecto?.etapa === 'ganado';
     log(convOk, 'POST /crm/:id/convertir (crea cliente + marca ganado)');
