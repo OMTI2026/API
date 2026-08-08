@@ -40,6 +40,7 @@ import casetasPagosRoutes from './routes/casetasPagos.routes.js';
 import combustibleRoutes from './routes/combustible.routes.js';
 import llantasRoutes from './routes/llantas.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
+import crmRoutes from './routes/crm.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -92,6 +93,7 @@ export async function build() {
   await app.register(combustibleRoutes, { prefix: '/combustible' });
   await app.register(llantasRoutes, { prefix: '/llantas' });
   await app.register(notificationsRoutes, { prefix: '/notifications' });
+  await app.register(crmRoutes, { prefix: '/crm' });
 
   return app;
 }
