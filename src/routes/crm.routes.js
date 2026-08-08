@@ -28,6 +28,16 @@ const actividadSchema = z.object({
   data: z.record(z.any()).optional(),
 });
 
+// La edición/avance de un prospecto se restringe a su DUEÑO (owner_id = el
+// usuario que lo registró). Excepción: admin y gerente editan cualquiera. Los
+// prospectos sin dueño (previos a la regla) quedan abiertos para no bloquearlos.
+function esPrivilegiado(user) {
+  return user?.rol === 'admin' || user?.rol === 'gerente';
+}
+function puedeEditarProspecto(user, row) {
+  return esPrivilegiado(user) || row.owner_id == null || String(row.owner_id) === String(user?.id);
+}
+
 export default async function crmRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
@@ -50,10 +60,11 @@ export default async function crmRoutes(app) {
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
     if (!canSeeBU(req.user, p.data.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     const d = p.data;
+    // El creador queda como dueño del prospecto (control de edición).
     const { rows } = await q(
-      `INSERT INTO prospectos (bu, empresa, contacto, etapa, data)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [d.bu, d.empresa, d.contacto ?? null, d.etapa ?? 'nuevo', d.data ?? {}],
+      `INSERT INTO prospectos (bu, empresa, contacto, etapa, data, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [d.bu, d.empresa, d.contacto ?? null, d.etapa ?? 'nuevo', d.data ?? {}, req.user.id],
     );
     return rows[0];
   });
@@ -61,9 +72,10 @@ export default async function crmRoutes(app) {
   app.put('/:id', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
     const p = baseSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
-    const cur = await q('SELECT bu FROM prospectos WHERE id = $1', [req.params.id]);
+    const cur = await q('SELECT bu, owner_id FROM prospectos WHERE id = $1', [req.params.id]);
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (!puedeEditarProspecto(req.user, cur.rows[0])) return reply.code(403).send({ error: 'not_owner' });
     const d = p.data;
     const { rows } = await q(
       `UPDATE prospectos SET
@@ -86,6 +98,7 @@ export default async function crmRoutes(app) {
     const pr = cur.rows[0];
     if (!pr) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, pr.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (!puedeEditarProspecto(req.user, pr)) return reply.code(403).send({ error: 'not_owner' });
     if (pr.cliente_id) return reply.code(409).send({ error: 'ya_convertido', cliente_id: pr.cliente_id });
 
     const result = await withTx(async (client) => {
@@ -157,9 +170,10 @@ export default async function crmRoutes(app) {
   app.post('/:id/actividades', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
     const p = actividadSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
-    const cur = await q('SELECT bu FROM prospectos WHERE id = $1', [req.params.id]);
+    const cur = await q('SELECT bu, owner_id FROM prospectos WHERE id = $1', [req.params.id]);
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (!puedeEditarProspecto(req.user, cur.rows[0])) return reply.code(403).send({ error: 'not_owner' });
     const d = p.data;
     const result = await withTx(async (client) => {
       const act = await client.query(
