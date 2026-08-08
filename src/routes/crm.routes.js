@@ -41,6 +41,23 @@ function puedeEditarProspecto(user, row) {
   return esPrivilegiado(user) || row.owner_id == null || String(row.owner_id) === String(user?.id);
 }
 
+// Los TELÉFONOS y CORREOS de contacto solo los ven el admin y el DUEÑO (creador)
+// del prospecto. Los demás (incluido gerente) no. Se aplica en el servidor para
+// que no viajen en la respuesta, no solo se oculten en pantalla.
+function puedeVerContactos(user, row) {
+  return user?.rol === 'admin' || (row?.owner_id != null && String(row.owner_id) === String(user?.id));
+}
+function redactarContactos(row, user) {
+  if (puedeVerContactos(user, row)) return row;
+  const data = { ...(row.data || {}) };
+  data.telefono = '';
+  data.correo = '';
+  if (Array.isArray(data.contactos)) {
+    data.contactos = data.contactos.map((c) => ({ ...(c || {}), tel: '', correo: '' }));
+  }
+  return { ...row, data, contactos_ocultos: true };
+}
+
 export default async function crmRoutes(app) {
   app.addHook('preHandler', app.authenticate);
 
@@ -55,7 +72,7 @@ export default async function crmRoutes(app) {
     }
     sql += ' ORDER BY created_at DESC';
     const { rows } = await q(sql, params);
-    return rows;
+    return rows.map((r) => redactarContactos(r, req.user));
   });
 
   app.post('/', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
@@ -75,11 +92,23 @@ export default async function crmRoutes(app) {
   app.put('/:id', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
     const p = baseSchema.partial().safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
-    const cur = await q('SELECT bu, owner_id FROM prospectos WHERE id = $1', [req.params.id]);
+    const cur = await q('SELECT bu, owner_id, data FROM prospectos WHERE id = $1', [req.params.id]);
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     if (!puedeEditarProspecto(req.user, cur.rows[0])) return reply.code(403).send({ error: 'not_owner' });
     const d = p.data;
+    // Si el editor NO puede ver los contactos (p.ej. gerente), preserva los
+    // teléfonos/correos existentes para que no los borre al guardar.
+    if (d.data && !puedeVerContactos(req.user, cur.rows[0])) {
+      const prev = cur.rows[0].data || {};
+      d.data = { ...d.data, telefono: prev.telefono ?? '', correo: prev.correo ?? '' };
+      if (Array.isArray(d.data.contactos)) {
+        const pc = Array.isArray(prev.contactos) ? prev.contactos : [];
+        d.data.contactos = d.data.contactos.map((c, i) => ({ ...(c || {}), tel: pc[i]?.tel ?? '', correo: pc[i]?.correo ?? '' }));
+      } else if (Array.isArray(prev.contactos)) {
+        d.data.contactos = prev.contactos;
+      }
+    }
     const { rows } = await q(
       `UPDATE prospectos SET
          empresa    = COALESCE($2, empresa),
@@ -91,7 +120,7 @@ export default async function crmRoutes(app) {
        WHERE id = $1 RETURNING *`,
       [req.params.id, d.empresa ?? null, d.contacto ?? null, d.etapa ?? null, d.tipo ?? null, d.data ?? null],
     );
-    return rows[0];
+    return redactarContactos(rows[0], req.user);
   });
 
   // Conversión: el prospecto se GANA → se da de alta en el TMS y se liga,
@@ -122,6 +151,7 @@ export default async function crmRoutes(app) {
         );
         return { prospecto: upd.rows[0], carrier: car.rows[0] };
       });
+      result.prospecto = redactarContactos(result.prospecto, req.user);
       return result;
     }
 
@@ -138,6 +168,7 @@ export default async function crmRoutes(app) {
       );
       return { prospecto: upd.rows[0], cliente: cli.rows[0] };
     });
+    result.prospecto = redactarContactos(result.prospecto, req.user);
     return result;
   });
 
