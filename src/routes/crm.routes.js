@@ -11,11 +11,14 @@ import { visibleBUs, canSeeBU } from '../lib/scope.js';
 const buEnum = z.enum(['broker', 'flota', 'ambos']);
 const etapaEnum = z.enum(['nuevo', 'contactado', 'propuesta', 'negociacion', 'ganado', 'perdido']);
 
+const tipoEnum = z.enum(['cliente', 'proveedor']);
+
 const baseSchema = z.object({
   bu: buEnum,
   empresa: z.string().min(1),
   contacto: z.string().optional(),
   etapa: etapaEnum.optional(),
+  tipo: tipoEnum.optional(),
   data: z.record(z.any()).optional(),
 });
 
@@ -62,9 +65,9 @@ export default async function crmRoutes(app) {
     const d = p.data;
     // El creador queda como dueño del prospecto (control de edición).
     const { rows } = await q(
-      `INSERT INTO prospectos (bu, empresa, contacto, etapa, data, owner_id)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [d.bu, d.empresa, d.contacto ?? null, d.etapa ?? 'nuevo', d.data ?? {}, req.user.id],
+      `INSERT INTO prospectos (bu, empresa, contacto, etapa, tipo, data, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [d.bu, d.empresa, d.contacto ?? null, d.etapa ?? 'nuevo', d.tipo ?? 'cliente', d.data ?? {}, req.user.id],
     );
     return rows[0];
   });
@@ -82,24 +85,45 @@ export default async function crmRoutes(app) {
          empresa    = COALESCE($2, empresa),
          contacto   = COALESCE($3, contacto),
          etapa      = COALESCE($4, etapa),
-         data       = COALESCE($5, data),
+         tipo       = COALESCE($5, tipo),
+         data       = COALESCE($6, data),
          updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [req.params.id, d.empresa ?? null, d.contacto ?? null, d.etapa ?? null, d.data ?? null],
+      [req.params.id, d.empresa ?? null, d.contacto ?? null, d.etapa ?? null, d.tipo ?? null, d.data ?? null],
     );
     return rows[0];
   });
 
-  // Conversión: el prospecto se GANA → se crea el cliente en el TMS y se liga
-  // (cliente_id) marcando etapa 'ganado'. Transaccional. A partir de aquí opera
-  // como cualquier cliente del TMS. Idempotente: si ya se convirtió, 409.
+  // Conversión: el prospecto se GANA → se da de alta en el TMS y se liga,
+  // marcando etapa 'ganado'. Transaccional. Según el TIPO: 'cliente' crea un
+  // registro en clients (cliente_id); 'proveedor' crea un transportista en
+  // carriers (carrier_id). Idempotente: si ya se convirtió, 409.
   app.post('/:id/convertir', { preHandler: [app.requirePerm('crm', 'edit')] }, async (req, reply) => {
     const cur = await q('SELECT * FROM prospectos WHERE id = $1', [req.params.id]);
     const pr = cur.rows[0];
     if (!pr) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, pr.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     if (!puedeEditarProspecto(req.user, pr)) return reply.code(403).send({ error: 'not_owner' });
-    if (pr.cliente_id) return reply.code(409).send({ error: 'ya_convertido', cliente_id: pr.cliente_id });
+    if (pr.cliente_id || pr.carrier_id) {
+      return reply.code(409).send({ error: 'ya_convertido', cliente_id: pr.cliente_id, carrier_id: pr.carrier_id });
+    }
+
+    if (pr.tipo === 'proveedor') {
+      const result = await withTx(async (client) => {
+        const car = await client.query(
+          `INSERT INTO carriers (bu, nombre, rfc, contacto, data)
+           VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+          [pr.bu, pr.empresa, pr.data?.rfc ?? null, pr.contacto ?? null, { origenProspectoId: pr.id }],
+        );
+        const upd = await client.query(
+          `UPDATE prospectos SET carrier_id = $2, etapa = 'ganado', updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [pr.id, car.rows[0].id],
+        );
+        return { prospecto: upd.rows[0], carrier: car.rows[0] };
+      });
+      return result;
+    }
 
     const result = await withTx(async (client) => {
       const cli = await client.query(

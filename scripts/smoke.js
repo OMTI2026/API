@@ -175,6 +175,20 @@ async function main() {
     if (conv.data?.cliente?.id) prospClienteId = conv.data.cliente.id;
   }
 
+  // 9h) CRM: prospecto tipo 'proveedor' + conversión a transportista (carriers).
+  let provId = null, provCarrierId = null;
+  const provCreate = await call('POST', '/crm', {
+    bu: 'broker', empresa: 'SMOKE PROVEEDOR', tipo: 'proveedor', data: { origen: 'smoke' },
+  }, true);
+  log(provCreate.status === 200 && provCreate.data?.tipo === 'proveedor', 'POST /crm (tipo proveedor)');
+  if (provCreate.data?.id) provId = provCreate.data.id;
+  if (provId) {
+    const conv = await call('POST', '/crm/' + provId + '/convertir', {}, true);
+    const ok = conv.status === 200 && conv.data?.carrier?.id && conv.data?.prospecto?.etapa === 'ganado';
+    log(ok, 'POST /crm/:id/convertir (proveedor -> transportista)');
+    if (conv.data?.carrier?.id) provCarrierId = conv.data.carrier.id;
+  }
+
   // 10) Upload sign (solo si R2 está configurado)
   if (fleteId) {
     const sign = await call('POST', '/upload/sign', {
@@ -218,6 +232,14 @@ async function main() {
   if (prospClienteId) {
     const del = await call('DELETE', '/clients/' + prospClienteId, null, true);
     log(del.status === 200, 'DELETE /clients/:id (limpieza prospecto convertido)');
+  }
+  if (provId) {
+    const del = await call('DELETE', '/crm/' + provId, null, true);
+    log(del.status === 200, 'DELETE /crm/:id (limpieza proveedor)');
+  }
+  if (provCarrierId) {
+    const del = await call('DELETE', '/carriers/' + provCarrierId, null, true);
+    log(del.status === 200, 'DELETE /carriers/:id (limpieza proveedor convertido)');
   }
 
   finish();
