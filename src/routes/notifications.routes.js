@@ -89,3 +89,25 @@ export async function notifyCapabilityOnce(cap, { type, title, message, entityTy
   );
   return rows.length;
 }
+
+// Como notifyCapabilityOnce, pero dirige por ROL (p.ej. 'admin'). Idempotente por
+// `dedupeKey`. Sirve para jobs periódicos que avisan a un grupo por rol.
+export async function notifyRoleOnce(rol, { type, title, message, entityType, entityId, data, dedupeKey }) {
+  const payload = JSON.stringify({ ...(data || {}), dedupeKey });
+  const { rows } = await q(
+    `INSERT INTO notifications (user_id, type, title, message, entity_type, entity_id, data)
+     SELECT u.id, $1, $2, $3, $4, $5, $6::jsonb
+     FROM users u
+     WHERE u.rol = $7
+       AND u.activo = true
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id = u.id
+           AND n.read_at IS NULL
+           AND n.data->>'dedupeKey' = $8
+       )
+     RETURNING id`,
+    [type, title, message ?? null, entityType ?? null, entityId ?? null, payload, rol, dedupeKey],
+  );
+  return rows.length;
+}
