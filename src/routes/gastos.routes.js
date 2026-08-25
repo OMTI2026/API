@@ -70,14 +70,43 @@ export default async function gastosRoutes(app) {
   });
 
   // Liberar finanzas: requiere monitoreo finalizado. Desbloquea CxC/CxP.
-  // No se exige capturar gastos extra: liberar sin gastos significa que el
-  // servicio no tuvo gastos extra y se libera sin cobro/pago.
+  // No se exige capturar gastos extra (ni broker ni flota): liberar sin gastos
+  // significa que el servicio no tuvo gastos extra y se libera sin cobro/pago.
   app.post('/liberar/:fleteId', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
     const f = await fleteBU(req.params.fleteId);
     if (!f) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, f.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     if (!f.mon_finalizado) return reply.code(409).send({ error: 'monitoreo_no_finalizado' });
     const { rows } = await q('UPDATE fletes SET gastos_liberado = true, updated_at = now() WHERE id = $1 RETURNING *', [req.params.fleteId]);
+    return rows[0];
+  });
+
+  // REVERTIR liberación — SOLO administrador. Regresa el servicio a "gasto extra"
+  // (gastos_liberado=false) para poder re-capturar cobro/pago cuando se liberó por
+  // error. Se bloquea si el cobro ya se concretó (cxc=cobrado) o el pago se cerró
+  // (cxp=cerrado), para no corromper la contabilidad: primero hay que revertir esos.
+  app.post('/revertir/:fleteId', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
+    const { rows: fr } = await q(
+      'SELECT bu, gastos_liberado FROM fletes WHERE id = $1',
+      [req.params.fleteId],
+    );
+    const f = fr[0];
+    if (!f) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, f.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (!f.gastos_liberado) return reply.code(409).send({ error: 'no_liberado' });
+    const { rows: sr } = await q(
+      `SELECT (SELECT status FROM cxc WHERE flete_id = $1) AS cxc,
+              (SELECT status FROM cxp WHERE flete_id = $1) AS cxp`,
+      [req.params.fleteId],
+    );
+    const s = sr[0] || {};
+    if (s.cxc === 'cobrado' || s.cxp === 'cerrado') {
+      return reply.code(409).send({ error: 'ya_cobrado_o_pagado' });
+    }
+    const { rows } = await q(
+      'UPDATE fletes SET gastos_liberado = false, updated_at = now() WHERE id = $1 RETURNING *',
+      [req.params.fleteId],
+    );
     return rows[0];
   });
 }
