@@ -58,6 +58,43 @@ export default async function gastosRoutes(app) {
     return rows[0];
   });
 
+  // EDITAR un gasto extra — permiso `gastos:edit`, SOLO mientras el servicio no
+  // esté liberado. Tras liberar (gastos_liberado=true) el gasto ya está en cobro/
+  // pago y no debe editarse (409 ya_liberado; primero se revierte la liberación).
+  const updateSchema = z.object({
+    tipo: z.string().optional(),
+    descripcion: z.string().optional(),
+    cobro: z.number().optional(),
+    pago: z.number().optional(),
+    fecha: z.string().optional(),
+  });
+  app.put('/:id', { preHandler: [app.requirePerm('gastos', 'edit')] }, async (req, reply) => {
+    const p = updateSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const { rows: gr } = await q(
+      `SELECT g.id, f.bu, f.gastos_liberado
+         FROM gastos_extra g JOIN fletes f ON f.id = g.flete_id
+        WHERE g.id = $1`,
+      [req.params.id],
+    );
+    const g = gr[0];
+    if (!g) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, g.bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (g.gastos_liberado) return reply.code(409).send({ error: 'ya_liberado' });
+    const d = p.data;
+    const { rows } = await q(
+      `UPDATE gastos_extra
+          SET tipo = COALESCE($2, tipo),
+              descripcion = COALESCE($3, descripcion),
+              cobro = COALESCE($4, cobro),
+              pago = COALESCE($5, pago),
+              fecha = COALESCE($6, fecha)
+        WHERE id = $1 RETURNING *`,
+      [req.params.id, d.tipo ?? null, d.descripcion ?? null, d.cobro ?? null, d.pago ?? null, d.fecha ?? null],
+    );
+    return rows[0];
+  });
+
   app.delete('/:id', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
     const { rows } = await q(
       'SELECT g.id, f.bu FROM gastos_extra g JOIN fletes f ON f.id = g.flete_id WHERE g.id = $1',
