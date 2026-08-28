@@ -36,7 +36,17 @@ export default async function sysconfigRoutes(app) {
     const { rows } = bu
       ? await q('SELECT * FROM sys_config WHERE bu = $1', [bu])
       : await q('SELECT * FROM sys_config WHERE bu IS NULL', []);
-    return rows[0] || defaultConfig(bu);
+    const cfg = rows[0] || defaultConfig(bu);
+    // Las METAS de venta son de la EMPRESA: solo el admin ('ambos') las edita, y
+    // quedan en la fila GLOBAL (bu NULL). Un usuario de una sola BU lee su propia
+    // fila (tema/logo por BU), pero las metas se resuelven de la fila global para
+    // que también vea el objetivo/avance configurado por el admin (antes: "Sin meta").
+    if (bu) {
+      const g = await q("SELECT settings->'metas' AS metas FROM sys_config WHERE bu IS NULL");
+      const metas = g.rows[0] && g.rows[0].metas;
+      if (metas) cfg.settings = { ...(cfg.settings || {}), metas };
+    }
+    return cfg;
   });
 
   // PUT /sysconfig — upsert (solo admin). Mergea settings JSONB.
