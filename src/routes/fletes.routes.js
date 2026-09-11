@@ -321,10 +321,20 @@ export default async function fletesRoutes(app) {
   app.patch('/:id/checklist', { preHandler: [app.requirePerm('checklist', 'edit')] }, async (req, reply) => {
     const p = checklistSchema.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
-    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    const cur = await q(
+      `SELECT bu, (data->>'docsAutorizado')::boolean AS docs_ok FROM fletes WHERE id = $1`,
+      [req.params.id],
+    );
     if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
     if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
     const d = p.data;
+    // La autorización TOTAL del checklist (que libera a Monitoreo) exige que la
+    // sección DOCUMENTACIÓN haya sido autorizada por un usuario con la capacidad
+    // 'autoriza_documentacion' (endpoint /checklist-docs). Guardar puntos NO se
+    // bloquea; solo el paso de autorizar.
+    if (d.autorizado === true && cur.rows[0].docs_ok !== true) {
+      return reply.code(409).send({ error: 'docs_no_autorizada' });
+    }
     // Construye el parche JSONB solo con las claves presentes, para no pisar otras.
     const patch = {};
     if (d.checklist !== undefined) patch.checklist = d.checklist;
@@ -334,6 +344,37 @@ export default async function fletesRoutes(app) {
       if (d.mon.status !== undefined) patch.monStatus = d.mon.status;
       if (d.mon.historial !== undefined) patch.monHistorial = d.mon.historial;
     }
+    const { rows } = await q(
+      `UPDATE fletes SET data = data || $2::jsonb, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, JSON.stringify(patch)],
+    );
+    return rows[0];
+  });
+
+  // AUTORIZAR DOCUMENTACIÓN — capacidad 'autoriza_documentacion' (usuario exclusivo).
+  // Marca data.docsAutorizado (+ quién/cuándo). Puede además persistir el checklist
+  // (para guardar los checks de documentación en la misma acción). La autorización
+  // total del checklist queda bloqueada hasta que esto se haga (ver arriba).
+  const checklistDocsSchema = z.object({
+    autorizado: z.boolean(),
+    por: z.string().optional(),
+    fecha_autorizacion: z.string().optional(),
+    checklist: z.record(z.any()).optional(),
+  });
+  app.patch('/:id/checklist-docs', { preHandler: [app.requireCapability('autoriza_documentacion')] }, async (req, reply) => {
+    const p = checklistDocsSchema.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', detail: p.error.flatten() });
+    const cur = await q('SELECT bu FROM fletes WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    const d = p.data;
+    const patch = {
+      docsAutorizado: d.autorizado,
+      docsAutorizadoPor: d.autorizado ? (d.por || req.user.name || 'Usuario') : null,
+      docsAutorizadoFecha: d.autorizado ? (d.fecha_autorizacion || new Date().toISOString()) : null,
+    };
+    if (d.checklist !== undefined) patch.checklist = d.checklist;
     const { rows } = await q(
       `UPDATE fletes SET data = data || $2::jsonb, updated_at = now()
        WHERE id = $1 RETURNING *`,
