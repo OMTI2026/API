@@ -437,4 +437,36 @@ export default async function fletesRoutes(app) {
     });
     return flete;
   });
+
+  // REACTIVAR servicio cancelado — SOLO administrador. Revierte la cancelación:
+  // status='activo', restaura montos del flete y de gastos_extra desde el snapshot
+  // data.cancelacion.montos_previos, quita la marca de cancelación y reactiva
+  // CxC/CxP a su estado inicial. Para servicios cancelados por error.
+  app.post('/:id/reactivar', { preHandler: [app.requireAdmin()] }, async (req, reply) => {
+    const cur = await q('SELECT bu, status, data FROM fletes WHERE id = $1', [req.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    if (!canSeeBU(req.user, cur.rows[0].bu)) return reply.code(403).send({ error: 'bu_forbidden' });
+    if (cur.rows[0].status !== 'cancelado') return reply.code(409).send({ error: 'no_cancelado' });
+    const mp = cur.rows[0].data?.cancelacion?.montos_previos || {};
+    const flete = await withTx(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE fletes
+            SET status = 'activo',
+                tarifa_cobro = COALESCE($2, tarifa_cobro),
+                tarifa_pago = COALESCE($3, tarifa_pago),
+                data = data - 'cancelacion', updated_at = now()
+          WHERE id = $1 RETURNING *`,
+        [req.params.id, mp.tarifa_cobro ?? null, mp.tarifa_pago ?? null],
+      );
+      // Restaura los montos de cada gasto extra desde el snapshot.
+      for (const g of mp.gastos || []) {
+        await client.query('UPDATE gastos_extra SET cobro = $2, pago = $3 WHERE id = $1', [g.id, g.cobro ?? 0, g.pago ?? 0]);
+      }
+      // Reactiva Cobranza/Pago a su estado inicial y quita la marca de cancelación.
+      await client.query(`UPDATE cxc SET status = 'por-facturar', data = data - 'cancelacion', updated_at = now() WHERE flete_id = $1`, [req.params.id]);
+      await client.query(`UPDATE cxp SET status = 'pendiente-prog', data = data - 'cancelacion', updated_at = now() WHERE flete_id = $1`, [req.params.id]);
+      return rows[0];
+    });
+    return flete;
+  });
 }
