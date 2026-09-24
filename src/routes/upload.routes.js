@@ -5,7 +5,7 @@ import { q } from '../db.js';
 import { canSeeBU, visibleBUs } from '../lib/scope.js';
 import { presignPut, presignGet, deleteObject, ALLOWED_MIME, MAX_BYTES } from '../lib/r2.js';
 
-const CONTEXTS = ['pod', 'factura', 'comprobante', 'complemento', 'evidencia_img', 'gps_img', 'estado_cuenta', 'carta_porte'];
+const CONTEXTS = ['pod', 'factura', 'factura_adicional', 'comprobante', 'complemento', 'evidencia_img', 'gps_img', 'estado_cuenta', 'carta_porte'];
 
 function safeName(name) {
   return String(name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
@@ -61,6 +61,9 @@ export default async function uploadRoutes(app) {
     fleteId: z.string().uuid(),
     contexto: z.enum(CONTEXTS),
     modulo: z.enum(['cxc', 'cxp', 'flete']).optional(),
+    // Referencia opcional a un sub-registro (p.ej. la factura de adicional a la
+    // que pertenece este PDF/XML, cuando contexto='factura_adicional').
+    refId: z.string().uuid().optional(),
     key: z.string().min(1),
     filename: z.string().min(1),
     mime: z.string().min(1),
@@ -71,15 +74,15 @@ export default async function uploadRoutes(app) {
   app.post('/confirm', async (req, reply) => {
     const parsed = confirmSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
-    const { fleteId, contexto, modulo, key, filename, mime, bytes } = parsed.data;
+    const { fleteId, contexto, modulo, refId, key, filename, mime, bytes } = parsed.data;
 
     const scope = await assertFleteScope(req.user, fleteId);
     if (!scope.ok) return reply.code(scope.code).send({ error: scope.code === 404 ? 'no_encontrado' : 'bu_forbidden' });
 
     const { rows } = await q(
-      `INSERT INTO archivos (flete_id, contexto, modulo, r2_key, filename, mime, bytes, uploaded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, contexto, filename, created_at`,
-      [fleteId, contexto, modulo || null, key, filename, mime, bytes, req.user.id],
+      `INSERT INTO archivos (flete_id, contexto, modulo, ref_id, r2_key, filename, mime, bytes, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, contexto, ref_id, filename, created_at`,
+      [fleteId, contexto, modulo || null, refId || null, key, filename, mime, bytes, req.user.id],
     );
     return rows[0];
   });
@@ -108,10 +111,11 @@ export default async function uploadRoutes(app) {
     const scope = await assertFleteScope(req.user, req.params.fleteId);
     if (!scope.ok) return reply.code(scope.code).send({ error: scope.code === 404 ? 'no_encontrado' : 'bu_forbidden' });
 
-    const { contexto } = req.query;
+    const { contexto, refId } = req.query;
     const params = [req.params.fleteId];
-    let sql = 'SELECT id, contexto, modulo, filename, mime, bytes, created_at FROM archivos WHERE flete_id = $1';
-    if (contexto) { params.push(contexto); sql += ' AND contexto = $2'; }
+    let sql = 'SELECT id, contexto, modulo, ref_id, filename, mime, bytes, created_at FROM archivos WHERE flete_id = $1';
+    if (contexto) { params.push(contexto); sql += ` AND contexto = $${params.length}`; }
+    if (refId) { params.push(refId); sql += ` AND ref_id = $${params.length}`; }
     sql += ' ORDER BY created_at DESC';
     const { rows } = await q(sql, params);
     return rows;
