@@ -41,6 +41,7 @@ import combustibleRoutes from './routes/combustible.routes.js';
 import llantasRoutes from './routes/llantas.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import crmRoutes from './routes/crm.routes.js';
+import facturasAdicionalRoutes from './routes/facturas-adicional.routes.js';
 
 export async function build() {
   const app = Fastify({
@@ -73,6 +74,7 @@ export async function build() {
   await app.register(fletesRoutes, { prefix: '/fletes' });
   await app.register(gastosRoutes, { prefix: '/gastos' });
   await app.register(cxcRoutes, { prefix: '/cxc' });
+  await app.register(facturasAdicionalRoutes, { prefix: '/facturas-adicional' });
   await app.register(cxpRoutes, { prefix: '/cxp' });
   await app.register(usuariosRoutes, { prefix: '/usuarios' });
   await app.register(statsRoutes, { prefix: '/stats' });
